@@ -27,7 +27,7 @@ label {
 	float: right;
 }
 
-#title{
+#title {
 	font-size:50px;
 	margin:30px 0px;
 }
@@ -40,6 +40,11 @@ label {
 .row{
 	margin-bottom: 10px;
 }
+
+.movie_canvas {
+	background-color: darkgray;
+}
+
 .col-xl-12 {
 	margin: 10px;
 }
@@ -53,6 +58,7 @@ label {
 .col-xl-6.text_left {
 	padding-left: 0;
 }
+
 .col-xl-6.text_right {
 	padding-right: 0;
 }

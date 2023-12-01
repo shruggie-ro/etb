@@ -13,17 +13,29 @@
       <div class="row">
         <div class="col-xl-6 side_left">
           <div class="movie">
-            <canvas id="default_canvas" width="640" height="480"></canvas>
+            <canvas id="default_canvas" class="movie_canvas" width="640" height="480"></canvas>
             <div class="movie_info">
-              <p class="subtitle">Capture Image</p>
+              <p class="subtitle"></p>
               <p class="now_time">00:00:00</p>
             </div>
           </div>
         </div>
       </div>
+
+      <div class="row">
+        <div class="col-xl-6 side_left">
+          <label>Current Camera Device
+            <select name="camera_device" id="change_model">
+              <option value="" hidden>Select camera device...</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
     </div>
 
     <script src="js/jquery-3.7.1.min.js"></script>
     <script src="js/bootstrap/bootstrap.min.js"></script>
+    <script src="js/main.js"></script>
   </body>
 </html>

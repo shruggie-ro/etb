@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.6)
 INCLUDE(CheckLibraryExists)
 INCLUDE(CheckFunctionExists)
 
-PROJECT(eak C)
+PROJECT(etb C)
 
 ADD_DEFINITIONS(-Wall -Werror)
 IF(CMAKE_C_COMPILER_VERSION VERSION_GREATER 6)
@@ -22,10 +22,10 @@ SET(LIBS ${websockets})
 SET(SOURCES
 	main.c ws_server.c)
 
-ADD_EXECUTABLE(eak ${SOURCES})
+ADD_EXECUTABLE(ebt ${SOURCES})
 
-TARGET_LINK_LIBRARIES(eak ${LIBS})
+TARGET_LINK_LIBRARIES(etb ${LIBS})
 
-INSTALL(TARGETS eak
+INSTALL(TARGETS etb
 	RUNTIME DESTINATION /usr/bin
 )

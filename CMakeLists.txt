@@ -20,9 +20,10 @@ FIND_LIBRARY(websockets NAMES websockets)
 SET(LIBS ${websockets})
 
 SET(SOURCES
+	protocol_command.c
 	main.c ws_server.c)
 
-ADD_EXECUTABLE(ebt ${SOURCES})
+ADD_EXECUTABLE(etb ${SOURCES})
 
 TARGET_LINK_LIBRARIES(etb ${LIBS})
 

@@ -5,15 +5,24 @@
 #include <libwebsockets.h>
 
 #include "ws_server.h"
+#include "protocol_command.h"
+
+#define LWS_PROTOCOL_HTTP_DEFAULT \
+	{ "http", lws_callback_http_dummy, 0, 0, 0, NULL, 0}
 
 struct ws_server {
 	struct lws_context *context;
 };
 
+static struct lws_protocols protocols[] = {
+	LWS_PROTOCOL_HTTP_DEFAULT,
+	LWS_PLUGIN_PROTOCOL_COMMAND,
+	LWS_PROTOCOL_LIST_TERM
+};
 
 static const struct lws_http_mount mount = {
 	.mountpoint			= "/",			/* mountpoint URL */
-	.origin				= "./client",		/* serve from dir */
+	.origin				= "../client",		/* serve from dir */
 	.def				= "index.html",		/* default filename */
 	.origin_protocol		= LWSMPRO_FILE,		/* files in a dir */
 	.mountpoint_len			= 1,			/* char count */
@@ -35,6 +44,8 @@ int ws_server_init(struct ws_server **ws, int argc, const char *argv[])
 	/* FIXME: hard-coded for now */
 	info.port = 8000;
 	info.mounts = &mount;
+	info.protocols = protocols;
+	info.options = LWS_SERVER_OPTION_HTTP_HEADERS_SECURITY_BEST_PRACTICES_ENFORCE;
 	info.gid = -1;
 	info.uid = -1;
 

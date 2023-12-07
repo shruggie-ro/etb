@@ -16,11 +16,14 @@ IF(HAS_IMPLICIT_FALLTHROUGH)
 ENDIF()
 
 FIND_LIBRARY(websockets NAMES websockets)
+FIND_LIBRARY(json NAMES json-c)
 
-SET(LIBS ${websockets})
+SET(LIBS ${websockets} ${json})
 
 SET(SOURCES
 	protocol_command.c
+	commands/handler.c
+	commands/camera.c
 	main.c ws_server.c)
 
 ADD_EXECUTABLE(etb ${SOURCES})

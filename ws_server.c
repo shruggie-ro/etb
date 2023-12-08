@@ -5,7 +5,7 @@
 #include <libwebsockets.h>
 
 #include "ws_server.h"
-#include "protocol_command.h"
+#include "plugins/camera/protocol.h"
 
 #define LWS_PROTOCOL_HTTP_DEFAULT \
 	{ "http", lws_callback_http_dummy, 0, 0, 0, NULL, 0}
@@ -16,7 +16,7 @@ struct ws_server {
 
 static struct lws_protocols protocols[] = {
 	LWS_PROTOCOL_HTTP_DEFAULT,
-	LWS_PLUGIN_PROTOCOL_COMMAND,
+	LWS_PLUGIN_PROTOCOL_CAMERA,
 	LWS_PROTOCOL_LIST_TERM
 };
 

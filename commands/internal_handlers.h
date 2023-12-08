@@ -3,6 +3,6 @@
 
 #include <json-c/json.h>
 
-json_object *camera_get_dev_names(json_object *);
+json_object *camera_devices_get(json_object *);
 
 #endif /* __INTERNAL_HANDLERS_H__ */

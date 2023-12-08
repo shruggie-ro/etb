@@ -10,7 +10,7 @@ struct handler {
 };
 
 static const struct handler handlers[] = {
-	{ "get-camera-devices", camera_get_dev_names },
+	{ "camera-devices-get", camera_devices_get },
 	{}
 };
 

@@ -123,9 +123,7 @@ static int handle_outgoing_message(struct lws *wsi, struct per_session_data__cam
 		return -1;
 	}
 
-	lwsl_warn(" wrote %d: flags: 0x%x\n", m, flags);
-	//lwsl_warn(" wrote %d: flags: 0x%x first: %d final %d\n",
-	//		m, flags, pmsg->first, pmsg->final);
+	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
 
 	return 0;
 }
@@ -164,7 +162,7 @@ static int handle_video_stream_out(struct lws *wsi, struct per_session_data__cam
 
 	camera_dev_release_capture_buffer(pss->cam_id, buf_id);
 
-	lwsl_warn(" wrote %d: flags: 0x%x\n", m, flags);
+	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
 
 	return 0;
 }
@@ -189,11 +187,11 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 		vhd->context = lws_get_context(wsi);
 		vhd->vhost = lws_get_vhost(wsi);
 
-		lwsl_warn("camera: protocol initialized\n");
+		lwsl_info("camera: protocol initialized\n");
 		break;
 
 	case LWS_CALLBACK_ESTABLISHED:
-		lwsl_warn("camera: client connected\n");
+		lwsl_info("camera: client connected\n");
 		pss->ring = lws_ring_create(sizeof(struct msg), RING_DEPTH,
 					    __destroy_message);
 		pss->cam_id = -1;
@@ -204,7 +202,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 	case LWS_CALLBACK_SERVER_WRITEABLE:
 
-		lwsl_warn("LWS_CALLBACK_SERVER_WRITEABLE\n");
+		lwsl_debug("LWS_CALLBACK_SERVER_WRITEABLE\n");
 
 		if (pss->write_consume_pending) {
 			/* perform the deferred fifo consume */
@@ -237,7 +235,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 	case LWS_CALLBACK_RECEIVE:
 
-		lwsl_warn("LWS_CALLBACK_RECEIVE: %4d (rpp %5d, first %d, "
+		lwsl_debug("LWS_CALLBACK_RECEIVE: %4d (rpp %5d, first %d, "
 			  "last %d, bin %d, msglen %d (+ %d = %d))\n",
 			  (int)len, (int)lws_remaining_packet_payload(wsi),
 			  lws_is_first_fragment(wsi),
@@ -272,7 +270,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 		break;
 
 	case LWS_CALLBACK_CLOSED:
-		lwsl_warn("camera: client disconnected\n");
+		lwsl_info("camera: client disconnected\n");
 		lws_ring_destroy(pss->ring);
 		break;
 

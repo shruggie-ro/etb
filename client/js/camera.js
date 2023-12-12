@@ -56,39 +56,46 @@ function camera_devices_get_response(ws, msg)
 	});
 }
 
-function connect_camera_socket() {
+// adapted from: https://github.com/oatpp/example-yuv-websocket-stream/blob/master/res/cam/wsImageView.html
+function yuv2CanvasImageData(canvas, data)
+{
+	let msg_array = new Uint8ClampedArray(data);
+
+	if (msg_array.length == 0)
+		return;
+
+	let context = canvas.getContext("2d");
+	let imgData = context.createImageData(640, 480);
+	let i, j;
+
+	for (i = 0, j = 0, g = 0; i < imgData.data.length && j < msg_array.length; i += 8, j += 4, g+= 2) {
+		const y1 = msg_array[j  ];
+		const u  = msg_array[j+1];
+		const y2 = msg_array[j+2];
+		const v  = msg_array[j+3];
+
+		imgData.data[i    ] = Math.min(255, Math.max(0, Math.floor(y1+1.4075*(v-128))));
+		imgData.data[i + 1] = Math.min(255, Math.max(0, Math.floor(y1-0.3455*(u-128)-(0.7169*(v-128)))));
+		imgData.data[i + 2] = Math.min(255, Math.max(0, Math.floor(y1+1.7790*(u-128))));
+		imgData.data[i + 3] = 255;
+		imgData.data[i + 4] = Math.min(255, Math.max(0, Math.floor(y2+1.4075*(v-128))));
+		imgData.data[i + 5] = Math.min(255, Math.max(0, Math.floor(y2-0.3455*(u-128)-(0.7169*(v-128)))));
+		imgData.data[i + 6] = Math.min(255, Math.max(0, Math.floor(y2+1.7790*(u-128))));
+		imgData.data[i + 7] = 255;
+	}
+	context.putImageData(imgData, 0, 0);
+}
+
+function connect_camera_socket()
+{
 	const camera_callbacks = {
 		"camera-devices-get": camera_devices_get_response,
 	};
 
 	function handle_binary_response(msg) {
-		let received_msg = new Uint8ClampedArray(msg.data);
-		if (received_msg.length == 0)
-			return;
-
 		let canvas = document.getElementById("default_canvas");
-		let context = canvas.getContext("2d");
-		let imgData = context.createImageData(640, 480);
-		let grayScale = new Uint8Array(640*480);
-		let i, j, g;
-		for (i = 0, j = 0, g = 0; i < imgData.data.length && j < received_msg.length; i += 8, j += 4, g+= 2) {
-			const y1  = received_msg[j  ];
-			const u   = received_msg[j+1];
-			const y2  = received_msg[j+2];
-			const v   = received_msg[j+3];
 
-			grayScale[g]   = y1;
-			grayScale[g+1] = y2;
-			imgData.data[i    ] = Math.min(255, Math.max(0, Math.floor(y1+1.4075*(v-128))));
-			imgData.data[i + 1] = Math.min(255, Math.max(0, Math.floor(y1-0.3455*(u-128)-(0.7169*(v-128)))));
-			imgData.data[i + 2] = Math.min(255, Math.max(0, Math.floor(y1+1.7790*(u-128))));
-			imgData.data[i + 3] = 255;
-			imgData.data[i + 4] = Math.min(255, Math.max(0, Math.floor(y2+1.4075*(v-128))));
-			imgData.data[i + 5] = Math.min(255, Math.max(0, Math.floor(y2-0.3455*(u-128)-(0.7169*(v-128)))));
-			imgData.data[i + 6] = Math.min(255, Math.max(0, Math.floor(y2+1.7790*(u-128))));
-			imgData.data[i + 7] = 255;
-		}
-		context.putImageData(imgData, 0, 0);
+		yuv2CanvasImageData(canvas, msg.data);
 	}
 
 	function handle_json_response(msg) {

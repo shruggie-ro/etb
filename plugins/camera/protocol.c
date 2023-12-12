@@ -5,11 +5,25 @@
 #include <json-c/json.h>
 
 #include "protocol.h"
-#include "handler.h"
+#include "camera.h"
 
 #define RING_DEPTH 4096
 
 /* one of these created for each message */
+
+enum command {
+	CAMERA_CMD_INVALID = -1,
+	CAMERA_CMD_DEVICES_GET = 0,
+	CAMERA_CMD_DEVICE_PLAY,
+	CAMERA_CMD_DEVICE_STOP,
+	CAMERA_CMD_MAX,
+};
+
+static const char *command_names[] = {
+	[CAMERA_CMD_DEVICES_GET] = "camera-devices-get",
+	[CAMERA_CMD_DEVICE_PLAY] = "camera-device-play",
+	[CAMERA_CMD_DEVICE_STOP] = "camera-device-stop",
+};
 
 struct msg {
 	json_object *response;
@@ -32,13 +46,29 @@ static void __destroy_message(void *_msg)
 	msg->send_buf = NULL;
 }
 
+static enum command protocol_get_command_enum(const char *cmd)
+{
+	int i;
+
+	if (!cmd)
+		return CAMERA_CMD_INVALID;
+
+	for (i = 0; i < CAMERA_CMD_MAX; i++) {
+		if (strcmp(cmd, command_names[i]) == 0)
+			return i;
+	}
+
+	return CAMERA_CMD_INVALID;
+}
+
 static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__camera *pss,
 				    void *in, size_t len)
 {
 	json_object *req = NULL;
-	enum RESPONSE resp_code = RESPONSE_UNKNOWN_REQUEST;
 	struct msg amsg;
 	bool first, final;
+	enum command cmd = CAMERA_CMD_INVALID;
+	bool send_req_back_as_reply = false;
 
 	first = lws_is_first_fragment(wsi);
 	final = lws_is_final_fragment(wsi);
@@ -48,31 +78,42 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 		const char *s = in;
 
 		req = json_tokener_parse(s);
-		resp_code = camera_command_handler(req);
+		s = json_object_get_string(json_object_object_get(req, "name"));
+
+		cmd = protocol_get_command_enum(s);
 	}
 
-	switch (resp_code) {
-		case RESPONSE_SEND_BACK_JSON:
-			amsg.response = req;
+	switch (cmd) {
+		case CAMERA_CMD_DEVICES_GET:
 			json_object_get(req);
-			if (!lws_ring_insert(pss->ring, &amsg, 1)) {
-				__destroy_message(&amsg);
-				lwsl_warn("dropping!\n");
-				break;
-			}
-
-			lws_callback_on_writable(wsi);
+			send_req_back_as_reply = true;
+			camera_devices_get(req);
 			break;
-		case RESPONSE_SEND_FRAMES:
-			pss->cam_id = json_object_get_uint64(json_object_object_get(req, "value"));
-			lws_callback_on_writable(wsi);
+		case CAMERA_CMD_DEVICE_PLAY:
+			pss->cam_id = camera_dev_play_start(req);
+			if (pss->cam_id > -1)
+				lws_callback_on_writable(wsi);
+			else
+				send_req_back_as_reply = true;
 			break;
-		case RESPONSE_STOP_CAPTURE:
+		case CAMERA_CMD_DEVICE_STOP:
+			camera_dev_play_stop(req);
 			pss->cam_id = -1;
 			break;
 		default:
-			// FIXME: handle other responses
 			break;
+	}
+
+	if (send_req_back_as_reply) {
+		amsg.response = req;
+		if (!lws_ring_insert(pss->ring, &amsg, 1)) {
+			__destroy_message(&amsg);
+			lwsl_warn("dropping!\n");
+			return -1;
+		}
+
+		json_object_get(req);
+		lws_callback_on_writable(wsi);
 	}
 
 	json_object_put(req);

@@ -1,5 +1,5 @@
 
-#include "handler.h"
+#include "camera.h"
 
 #include <errno.h>
 #include <string.h>
@@ -30,7 +30,7 @@ struct camera_entry {
 };
 
 /* FIXME: add mutex when adding threads */
-static struct camera_entry camera_active_list[NUM_MAX_CAMERAS];
+static struct camera_entry camera_active_list[NUM_MAX_CAMERAS] = {};
 
 static int xioctl(int fd, int request, void* arg)
 {
@@ -176,17 +176,18 @@ static struct camera_entry *camera_find_active(const char *dev, int *first_free_
 
 /* Public functions defined from here on */
 
-json_object *camera_devices_get(json_object *, enum RESPONSE *rc)
+int camera_devices_get(json_object *req)
 {
 	char dev_name[DEV_NAME_MAX_SIZE];
 	struct v4l2_capability caps;
 	json_object *cam_arr;
 	int i, fd, ret;
+	const char *err = NULL;
 
 	cam_arr = json_object_new_array();
 	if (!cam_arr) {
-		*rc = RESPONSE_INTERNAL_ERROR;
-		return NULL;
+		err = "error creating JSON array";
+		goto err;
 	}
 
 	for (i = 0; i < 999; i++) {
@@ -218,104 +219,119 @@ json_object *camera_devices_get(json_object *, enum RESPONSE *rc)
 		json_object_array_add(cam_arr, e);
 	}
 
-	*rc = RESPONSE_SEND_BACK_JSON;
+	json_object_object_add(req, "value", cam_arr);
 
-	return cam_arr;
+	return 0;
+err:
+	json_object_object_add(req, "error", json_object_new_string(err));
+	lwsl_err("%s: %s\n", __func__, err);
+	return -1;
 }
 
-json_object *camera_dev_play_start(json_object *req, enum RESPONSE *rc)
+int camera_dev_play_start(json_object *req)
 {
-	struct camera_entry *cam;
+	struct camera_entry *cam = NULL;
+	json_object *jval;
 	const char *dev;
 	int i, cam_idx = -1;
+	int cam_fd = -1;
+	const char *err = NULL;
 
-	dev = json_object_get_string(json_object_object_get(req, "device"));
+	jval = json_object_object_get(req, "value");
+	dev = json_object_get_string(json_object_object_get(jval, "device"));
 	if (!dev) {
-		lwsl_warn("%s: no camera device provided\n", __func__);
-		*rc = RESPONSE_INVALID_REQUEST;
-		return NULL;
+		err = "no camera device provided";
+		goto err;
 	}
 
 	if (camera_find_active(dev, &cam_idx)) {
-		lwsl_info("%s: camera is already playing\n", __func__);
-		*rc = RESPONSE_SEND_FRAMES;
-		return NULL;
+		err = "camera is already playing";
+		goto err;
 	}
 
 	if (cam_idx < 0) {
-		lwsl_info("%s: cannot support more than 32 cameras\n", __func__);
-		*rc = RESPONSE_INTERNAL_ERROR;
-		return NULL;
+		err = "cannot support more than 32 cameras";
+		goto err;
 	}
 
 	cam = &camera_active_list[cam_idx];
 
-	cam->fd = open(dev, O_RDWR | O_CLOEXEC);
+	cam->dev_name[0] = '\0';
+	cam_fd = cam->fd = open(dev, O_RDWR | O_CLOEXEC);
 	if (cam->fd < 0) {
-		*rc = RESPONSE_INTERNAL_ERROR;
-		return NULL;
+		err = "error opening socket to device";
+		goto err;
 	}
 
-	if (camera_set_capture_parameters(cam->fd) < 0)
+	if (camera_set_capture_parameters(cam->fd) < 0) {
+		err = "error configuring camera parameters";
 		goto err;
+	}
 
-	if (camera_request_buffers(cam->fd, NUM_MAX_CAPTURE_BUFS) < 0)
+	if (camera_request_buffers(cam->fd, NUM_MAX_CAPTURE_BUFS) < 0) {
+		err = "error requesting capture buffers";
 		goto err;
+	}
 
 	for (i = 0; i < NUM_MAX_CAPTURE_BUFS; i++) {
 		int sz = camera_query_buffer(cam->fd, i, &cam->buffers[i]);
-		if (sz < 0)
+		if (sz < 0) {
+			err = "error querying buffer";
 			goto err;
+		}
 		/* For now, we assume buffers are the same size */
 
-		if (camera_enqueue_buffer(cam->fd, i) < 0)
+		if (camera_enqueue_buffer(cam->fd, i) < 0) {
+			err = "error enqueuing buffer";
 			goto err;
+		}
 	}
 
-	if (camera_streaming_set_on(cam->fd, true) < 0)
+	if (camera_streaming_set_on(cam->fd, true) < 0) {
+		err = "failed to enable streaming";
 		goto err;
+	}
 
 	strncpy(cam->dev_name, dev, sizeof(cam->dev_name) - 1);
 	json_object_object_add(req, "value", json_object_new_uint64(cam_idx));
 
-	*rc = RESPONSE_SEND_FRAMES;
-
-	return NULL;
+	return cam_idx;
 err:
-	*rc = RESPONSE_INTERNAL_ERROR;
-	close(cam->fd);
-	return NULL;
+	json_object_object_add(req, "error", json_object_new_string(err));
+	lwsl_err("%s: %s\n", __func__, err);
+	if (cam_fd > -1)
+		close(cam_fd);
+	if (cam) {
+		cam->fd = -1;
+		cam->dev_name[0] = '\0';
+	}
+	return -1;
 }
 
-json_object *camera_dev_play_stop(json_object *req, enum RESPONSE *rc)
+void camera_dev_play_stop(json_object *req)
 {
 	struct camera_entry *cam;
+	json_object *jval;
 	const char *dev;
 	int i;
 
-	dev = json_object_get_string(json_object_object_get(req, "device"));
-	if (!dev) {
-		*rc = RESPONSE_INVALID_REQUEST;
-		return NULL;
-	}
+	jval = json_object_object_get(req, "value");
+	dev = json_object_get_string(json_object_object_get(jval, "device"));
+	if (!dev)
+		return;
 
 	cam = camera_find_active(dev, NULL);
-	if (!cam) {
-		*rc = RESPONSE_INVALID_REQUEST;
-		return NULL;
-	}
+	if (!cam)
+		return;
 
 	camera_streaming_set_on(cam->fd, false);
 
 	cam->dev_name[0] = '\0';
 	close(cam->fd);
+	cam->fd = -1;
 
 	for (i = 0; i < NUM_MAX_CAPTURE_BUFS; i++)
 		munmap(cam->buffers[i].ptr, cam->buffers[i].length);
-
-	*rc = RESPONSE_STOP_CAPTURE;
-
-	return NULL;
 }
 
 const uint8_t *camera_dev_acquire_capture_buffer(int cam_idx, int *buf_id, size_t *buf_len)

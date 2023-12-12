@@ -22,7 +22,6 @@ SET(LIBS ${websockets} ${json})
 
 SET(SOURCES
 	plugins/camera/camera.c
-	plugins/camera/handler.c
 	plugins/camera/protocol.c
 	main.c ws_server.c)
 

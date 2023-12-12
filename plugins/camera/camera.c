@@ -18,11 +18,6 @@
 #define NUM_MAX_CAPTURE_BUFS	8
 #define DEV_NAME_MAX_SIZE	sizeof("/dev/video999")
 
-struct camera_buffer {
-	uint8_t *ptr;
-	size_t length;
-};
-
 struct camera_entry {
 	char dev_name[DEV_NAME_MAX_SIZE];
 	struct camera_buffer buffers[NUM_MAX_CAPTURE_BUFS];
@@ -100,7 +95,7 @@ static int camera_enqueue_buffer(int fd, int index) {
 	return bufd.bytesused;
 }
 
-static int camera_dequeue_buffer(int fd, size_t *blen) {
+static int camera_dequeue_buffer(int fd) {
 	struct v4l2_buffer buf = {};
 
 	buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -111,8 +106,6 @@ static int camera_dequeue_buffer(int fd, size_t *blen) {
 		lwsl_err("ioctl(VIDIOC_QBUF): %s\n", strerror(errno));
 		return -1;
 	}
-
-	*blen = buf.length;
 
 	return buf.index;
 }
@@ -132,6 +125,7 @@ static int camera_query_buffer(int fd, int index, struct camera_buffer *cam_buf)
 
 	cam_buf->ptr = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, buf.m.offset);
 	cam_buf->length = buf.length;
+	cam_buf->id = index;
 
 	return buf.length;
 }
@@ -233,7 +227,7 @@ int camera_dev_play_start(json_object *req)
 	struct camera_entry *cam = NULL;
 	json_object *jval;
 	const char *dev;
-	int i, cam_idx = -1;
+	int i, cam_id = -1;
 	int cam_fd = -1;
 	const char *err = NULL;
 
@@ -244,17 +238,17 @@ int camera_dev_play_start(json_object *req)
 		goto err;
 	}
 
-	if (camera_find_active(dev, &cam_idx)) {
+	if (camera_find_active(dev, &cam_id)) {
 		err = "camera is already playing";
 		goto err;
 	}
 
-	if (cam_idx < 0) {
+	if (cam_id < 0) {
 		err = "cannot support more than 32 cameras";
 		goto err;
 	}
 
-	cam = &camera_active_list[cam_idx];
+	cam = &camera_active_list[cam_id];
 
 	cam->dev_name[0] = '\0';
 	cam_fd = cam->fd = open(dev, O_RDWR | O_CLOEXEC);
@@ -293,9 +287,9 @@ int camera_dev_play_start(json_object *req)
 	}
 
 	strncpy(cam->dev_name, dev, sizeof(cam->dev_name) - 1);
-	json_object_object_add(req, "value", json_object_new_uint64(cam_idx));
+	json_object_object_add(req, "value", json_object_new_uint64(cam_id));
 
-	return cam_idx;
+	return cam_id;
 err:
 	json_object_object_add(req, "error", json_object_new_string(err));
 	lwsl_err("%s: %s\n", __func__, err);
@@ -334,52 +328,56 @@ void camera_dev_play_stop(json_object *req)
 		munmap(cam->buffers[i].ptr, cam->buffers[i].length);
 }
 
-const uint8_t *camera_dev_acquire_capture_buffer(int cam_idx, int *buf_id, size_t *buf_len)
+int camera_dev_acquire_capture_buffer(int cam_id, struct camera_buffer *buf)
 {
 	struct camera_entry *cam;
+	int buf_id;
 
-	if (cam_idx < 0 || cam_idx >= NUM_MAX_CAMERAS) {
-		lwsl_err("%s: camera index out of range: %d\n", __func__, cam_idx);
-		return NULL;
+	if (cam_id < 0 || cam_id >= NUM_MAX_CAMERAS) {
+		lwsl_err("%s: camera index out of range: %d\n", __func__, cam_id);
+		return -1;
 	}
 
-	cam = &camera_active_list[cam_idx];
+	cam = &camera_active_list[cam_id];
 	if (cam->dev_name[0] == '\0') {
-		lwsl_err("%s: inactive camera for index %d\n", __func__, cam_idx);
-		return NULL;
+		lwsl_err("%s: inactive camera for index %d\n", __func__, cam_id);
+		return -1;
 	}
 
-	if (buf_len)
-		*buf_len = 0;
+	buf_id = camera_dequeue_buffer(cam->fd);
+	if (buf_id < 0)
+		return -1;
 
-	*buf_id = camera_dequeue_buffer(cam->fd, buf_len);
+	memcpy(buf, &cam->buffers[buf_id], sizeof(*buf));
 
-	if (*buf_id < 0)
-		return NULL;
-
-	return cam->buffers[*buf_id].ptr;
+	return 0;
 }
 
-void camera_dev_release_capture_buffer(int cam_idx, int buf_id)
+void camera_dev_release_capture_buffer(int cam_id, struct camera_buffer *buf)
 {
 	struct camera_entry *cam;
 
-	if (cam_idx < 0 || cam_idx >= NUM_MAX_CAMERAS) {
-		lwsl_err("%s: camera index out of range: %d\n", __func__, cam_idx);
+	if (cam_id < 0 || cam_id >= NUM_MAX_CAMERAS) {
+		lwsl_err("%s: camera index out of range: %d\n", __func__, cam_id);
 		return;
 	}
 
-	if (buf_id < 0 || buf_id >= NUM_MAX_CAPTURE_BUFS) {
-		lwsl_err("%s: buffer index out of range: %d\n", __func__, buf_id);
+	if (!buf) {
+		lwsl_err("%s: NULL buffer object\n", __func__);
 		return;
 	}
 
-	cam = &camera_active_list[cam_idx];
+	if (buf->id >= NUM_MAX_CAPTURE_BUFS) {
+		lwsl_err("%s: buffer index out of range: %u\n", __func__, buf->id);
+		return;
+	}
+
+	cam = &camera_active_list[cam_id];
 	if (cam->dev_name[0] == '\0') {
-		lwsl_err("%s: inactive camera for index %d\n", __func__, cam_idx);
+		lwsl_err("%s: inactive camera for index %d\n", __func__, cam_id);
 		return;
 	}
 
-	camera_enqueue_buffer(cam->fd, buf_id);
+	camera_enqueue_buffer(cam->fd, buf->id);
 }
 

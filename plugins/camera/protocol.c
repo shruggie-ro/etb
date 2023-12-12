@@ -171,26 +171,23 @@ static int handle_outgoing_message(struct lws *wsi, struct per_session_data__cam
 
 static int handle_video_stream_out(struct lws *wsi, struct per_session_data__camera *pss)
 {
-	const uint8_t *buf = NULL;
+	struct camera_buffer buf = {};
 	struct msg amsg = {};
-	size_t blen = 0;
 	int m, n, flags;
-	int buf_id;
 
-	buf = camera_dev_acquire_capture_buffer(pss->cam_id, &buf_id, &blen);
-	if (!buf) {
+	if (camera_dev_acquire_capture_buffer(pss->cam_id, &buf)) {
 		lwsl_err(" (got null buffer from camera)\n");
 		return -1;
 	}
 
-	n = blen;
+	n = buf.length;
 	amsg.send_buf = malloc(n + LWS_PRE);
 	if (!amsg.send_buf) {
 		lwsl_warn(" (could not allocate send buffer)\n");
 		return -1;
 	}
 
-	memcpy(amsg.send_buf + LWS_PRE, buf, n);
+	memcpy(amsg.send_buf + LWS_PRE, buf.ptr, n);
 
 	// FIXME: hardcoded
 	flags = lws_write_ws_flags(LWS_WRITE_BINARY, 1, 1);
@@ -201,7 +198,7 @@ static int handle_video_stream_out(struct lws *wsi, struct per_session_data__cam
 		return -1;
 	}
 
-	camera_dev_release_capture_buffer(pss->cam_id, buf_id);
+	camera_dev_release_capture_buffer(pss->cam_id, &buf);
 
 	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
 

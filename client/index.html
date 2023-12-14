@@ -3,35 +3,22 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Embedded Tools Browser</title>
+    <title>Embedded ToolBox</title>
     <link rel="stylesheet" href="css/main.css" />
   </head>
 
   <body>
-    <div class="container-fluid">
-      <div class="row">
-        <div class="col-xl-6 side_left">
-          <div class="movie">
-            <canvas id="default_canvas" class="default_canvas" width="640" height="480"></canvas>
-            <div class="movie_info">
-              <p class="subtitle"></p>
-              <p class="now_time">00:00:00</p>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div class="movie">
+      <canvas id="default_canvas" class="movie_canvas" width="640" height="480"></canvas>
+    </div>
 
-      <div class="row">
-        <div class="col-xl-6 side_left">
-          <label>Current Camera Device
-            <select name="camera_device_sel" id="camera_device_sel">
-              <option value="" hidden>No camera device...</option>
-            </select>
-          </label>
-          <input id="camera_device_play" name="camera_device_play" type="button" value="Play" disabled />
-        </div>
-      </div>
-
+    <div class="row">
+      <label>Current Camera Device
+        <select name="camera_device_sel" id="camera_device_sel">
+          <option value="" hidden>No camera device...</option>
+        </select>
+      </label>
+      <input id="camera_device_play" name="camera_device_play" type="button" value="Play" disabled />
     </div>
 
     <script src="js/main.js"></script>

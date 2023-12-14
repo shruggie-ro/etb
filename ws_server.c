@@ -10,6 +10,10 @@
 #define LWS_PROTOCOL_HTTP_DEFAULT \
 	{ "http", lws_callback_http_dummy, 0, 0, 0, NULL, 0}
 
+#ifndef HTTP_ROOT
+#error "Must define HTTP_ROOT, for the location of the files to serve"
+#endif
+
 struct ws_server {
 	struct lws_context *context;
 };
@@ -22,7 +26,7 @@ static struct lws_protocols protocols[] = {
 
 static const struct lws_http_mount mount = {
 	.mountpoint			= "/",			/* mountpoint URL */
-	.origin				= "../client",		/* serve from dir */
+	.origin				= "" HTTP_ROOT "",	/* serve from dir */
 	.def				= "index.html",		/* default filename */
 	.origin_protocol		= LWSMPRO_FILE,		/* files in a dir */
 	.mountpoint_len			= 1,			/* char count */

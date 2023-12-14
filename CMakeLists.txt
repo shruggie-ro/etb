@@ -17,11 +17,13 @@ ENDIF()
 
 FIND_LIBRARY(websockets NAMES websockets)
 FIND_LIBRARY(json NAMES json-c)
+FIND_LIBRARY(turbojpeg NAMES turbojpeg)
 
-SET(LIBS ${websockets} ${json})
+SET(LIBS ${websockets} ${json} ${turbojpeg})
 
 SET(SOURCES
 	plugins/camera/camera.c
+	plugins/camera/jpeg.c
 	plugins/camera/protocol.c
 	main.c ws_server.c)
 

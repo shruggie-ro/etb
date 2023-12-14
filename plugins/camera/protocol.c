@@ -173,6 +173,8 @@ static int handle_video_stream_out(struct lws *wsi, struct per_session_data__cam
 {
 	struct camera_buffer buf = {};
 	struct msg amsg = {};
+	uint8_t *outbuf;
+	size_t jpeg_buflen = 0;
 	int m, n, flags;
 
 	if (camera_dev_acquire_capture_buffer(pss->cam_id, &buf)) {
@@ -180,14 +182,23 @@ static int handle_video_stream_out(struct lws *wsi, struct per_session_data__cam
 		return -1;
 	}
 
-	n = buf.length;
+	outbuf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr, 640, 480,
+				     2, 1, 75, &jpeg_buflen);
+	if (!outbuf) {
+		lwsl_warn(" (could not compress jpeg)\n");
+		return -1;
+	}
+
+	n = jpeg_buflen;
 	amsg.send_buf = malloc(n + LWS_PRE);
 	if (!amsg.send_buf) {
+		tjFree(outbuf);
 		lwsl_warn(" (could not allocate send buffer)\n");
 		return -1;
 	}
 
-	memcpy(amsg.send_buf + LWS_PRE, buf.ptr, n);
+	memcpy(amsg.send_buf + LWS_PRE, outbuf, n);
+	tjFree(outbuf);
 
 	// FIXME: hardcoded
 	flags = lws_write_ws_flags(LWS_WRITE_BINARY, 1, 1);
@@ -232,6 +243,15 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 		lwsl_info("camera: client connected\n");
 		pss->ring = lws_ring_create(sizeof(struct msg), RING_DEPTH,
 					    __destroy_message);
+
+		/* FIXME: fallback to RAW? */
+		pss->tjpeg_handle = tjInitCompress();
+		if (!pss->tjpeg_handle) {
+			lwsl_warn("%s: could not initialized turbo-jpeg: %s\n",
+				  __func__, tjGetErrorStr());
+			return -1;
+		}
+
 		pss->cam_id = -1;
 		if (!pss->ring)
 			return 1;
@@ -309,6 +329,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 	case LWS_CALLBACK_CLOSED:
 		lwsl_info("camera: client disconnected\n");
+		tjDestroy(pss->tjpeg_handle);
 		lws_ring_destroy(pss->ring);
 		break;
 

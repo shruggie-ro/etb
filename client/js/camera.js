@@ -98,6 +98,20 @@ function connect_camera_socket()
 		yuv2CanvasImageData(canvas, msg.data);
 	}
 
+	let imgElem = document.createElement("img");
+	function handle_binary_response2(msg) {
+		let canvas = document.getElementById("default_canvas");
+		let context = canvas.getContext("2d");
+
+		let base64Image = btoa(String.fromCharCode.apply(null, new Uint8Array(msg.data)));
+
+		imgElem.width = 640;
+		imgElem.height = 480;
+		imgElem.src = "data:image/jpeg;base64," + base64Image;
+
+		context.drawImage(imgElem, 0, 0, 640, 480);
+	}
+
 	function handle_json_response(msg) {
 		var msg = JSON.parse(msg.data);
 		if (!Object.hasOwn(msg, 'name'))
@@ -117,7 +131,7 @@ function connect_camera_socket()
 
 		ws.onmessage = function got_packet(msg) {
 			if (msg.data instanceof ArrayBuffer) {
-				handle_binary_response(msg);
+				handle_binary_response2(msg);
 			} else {
 				handle_json_response(msg);
 			}

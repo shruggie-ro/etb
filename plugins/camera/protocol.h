@@ -2,6 +2,7 @@
 #define __PROTOCOL_CAMERA_H__
 
 #include <libwebsockets.h>
+#include "jpeg.h"
 
 /* FIXME: abstract this better */
 
@@ -13,6 +14,7 @@ struct per_session_data__camera {
 	uint32_t msglen;
 	uint32_t tail;
 	int cam_id;
+	tjhandle tjpeg_handle;
 	uint8_t flow_controlled:1;
 	uint8_t write_consume_pending:1;
 };

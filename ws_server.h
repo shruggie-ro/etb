@@ -1,6 +1,10 @@
 #ifndef __WS_SERVER_H__
 #define __WS_SERVER_H__
 
+#ifndef LWS_PROTOCOL_LIST_TERM
+#define LWS_PROTOCOL_LIST_TERM {}
+#endif
+
 /* Opaque type for a Websocket server instance */
 struct ws_server;
 

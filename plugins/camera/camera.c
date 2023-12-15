@@ -53,14 +53,13 @@ static int camera_set_capture_parameters(int fd)
 		return -1;
 	}
 
-	/* FIXME: this may not always work on some RZ ISP stuff */
 	setfps.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	setfps.parm.capture.timeperframe.numerator = 1;
 	setfps.parm.capture.timeperframe.denominator = 30;
 
 	if (xioctl(fd, VIDIOC_S_PARM, &setfps) < 0) {
-		lwsl_err("ioctl(VIDIOC_S_PARM): %s\n", strerror(errno));
-		return -1;
+		lwsl_warn("ioctl(VIDIOC_S_PARM): %s\n", strerror(errno));
+		return 0;
 	}
 
 	return 0;

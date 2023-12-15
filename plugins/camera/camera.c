@@ -205,10 +205,10 @@ int camera_devices_get(json_object *req)
 		json_object_object_add(e, "device", json_object_new_string(dev_name));
 		json_object_object_add(e, "driver", json_object_new_string((char *)caps.driver));
 		json_object_object_add(e, "card", json_object_new_string((char *)caps.card));
-		json_object_object_add(e, "version", json_object_new_uint64(caps.version));
+		json_object_object_add(e, "version", json_object_new_int(caps.version));
 		/* FIXME: maybe we stringify these below? */
-		json_object_object_add(e, "capabilities", json_object_new_uint64(caps.capabilities));;
-		json_object_object_add(e, "device_caps", json_object_new_uint64(caps.device_caps));
+		json_object_object_add(e, "capabilities", json_object_new_int(caps.capabilities));;
+		json_object_object_add(e, "device_caps", json_object_new_int(caps.device_caps));
 
 		json_object_array_add(cam_arr, e);
 	}
@@ -287,7 +287,7 @@ int camera_dev_play_start(json_object *req)
 	}
 
 	strncpy(cam->dev_name, dev, sizeof(cam->dev_name) - 1);
-	json_object_object_add(req, "value", json_object_new_uint64(cam_id));
+	json_object_object_add(req, "value", json_object_new_int(cam_id));
 
 	return cam_id;
 err:

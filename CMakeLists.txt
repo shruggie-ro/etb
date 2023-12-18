@@ -41,3 +41,6 @@ INSTALL(TARGETS etb
 INSTALL(DIRECTORY client/
 	DESTINATION ${HTTP_ROOT}
 )
+INSTALL(FILES systemd/etb.service
+	DESTINATION ${CMAKE_INSTALL_PREFIX}/../lib/systemd/system
+)

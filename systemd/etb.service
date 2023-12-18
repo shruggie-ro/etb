@@ -1,0 +1,12 @@
+[Unit]
+Description=Embedded ToolBox
+After=systemd-user-sessions.service
+
+[Service]
+RemainAfterExit=yes
+ExecStart=/usr/bin/etb
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

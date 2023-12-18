@@ -226,78 +226,82 @@ int camera_dev_play_start(json_object *req)
 	struct camera_entry *cam = NULL;
 	json_object *jval;
 	const char *dev;
-	int i, cam_id = -1;
-	int cam_fd = -1;
+	int ibuf, cam_id = -1;
 	const char *err = NULL;
 
 	jval = json_object_object_get(req, "value");
 	dev = json_object_get_string(json_object_object_get(jval, "device"));
 	if (!dev) {
 		err = "no camera device provided";
-		goto err;
+		goto err_msg;
 	}
 
 	if (camera_find_active(dev, &cam_id)) {
 		err = "camera is already playing";
-		goto err;
+		goto err_msg;
 	}
 
 	if (cam_id < 0) {
 		err = "cannot support more than 32 cameras";
-		goto err;
+		goto err_msg;
 	}
 
 	cam = &camera_active_list[cam_id];
 
 	cam->dev_name[0] = '\0';
-	cam_fd = cam->fd = open(dev, O_RDWR | O_CLOEXEC);
+	cam->fd = open(dev, O_RDWR | O_CLOEXEC);
 	if (cam->fd < 0) {
 		err = "error opening socket to device";
-		goto err;
+		goto err_cam_inactive;
 	}
 
 	if (camera_set_capture_parameters(cam->fd) < 0) {
 		err = "error configuring camera parameters";
-		goto err;
+		goto err_close_fd;
 	}
 
 	if (camera_request_buffers(cam->fd, NUM_MAX_CAPTURE_BUFS) < 0) {
 		err = "error requesting capture buffers";
-		goto err;
+		goto err_close_fd;
 	}
 
-	for (i = 0; i < NUM_MAX_CAPTURE_BUFS; i++) {
-		int sz = camera_query_buffer(cam->fd, i, &cam->buffers[i]);
+	for (ibuf = 0; ibuf < NUM_MAX_CAPTURE_BUFS; ibuf++) {
+		int sz = camera_query_buffer(cam->fd, ibuf, &cam->buffers[ibuf]);
 		if (sz < 0) {
 			err = "error querying buffer";
-			goto err;
+			goto err_free_bufs;
 		}
 		/* For now, we assume buffers are the same size */
 
-		if (camera_enqueue_buffer(cam->fd, i) < 0) {
+		if (camera_enqueue_buffer(cam->fd, ibuf) < 0) {
 			err = "error enqueuing buffer";
-			goto err;
+			goto err_free_bufs;
 		}
 	}
 
+	ibuf -= 1; /* in case we need to unwind */
 	if (camera_streaming_set_on(cam->fd, true) < 0) {
 		err = "failed to enable streaming";
-		goto err;
+		goto err_free_bufs;
 	}
 
 	strncpy(cam->dev_name, dev, sizeof(cam->dev_name) - 1);
 	json_object_object_add(req, "value", json_object_new_int(cam_id));
 
 	return cam_id;
-err:
-	json_object_object_add(req, "error", json_object_new_string(err));
-	lwsl_err("%s: %s\n", __func__, err);
-	if (cam_fd > -1)
-		close(cam_fd);
-	if (cam) {
-		cam->fd = -1;
-		cam->dev_name[0] = '\0';
+
+err_free_bufs:
+	for (; ibuf >= 0; ibuf--) {
+		munmap(cam->buffers[ibuf].ptr, cam->buffers[ibuf].length);
 	}
+err_close_fd:
+	close(cam->fd);
+err_cam_inactive:
+	cam->dev_name[0] = '\0';
+err_msg:
+	lwsl_err("%s: %s\n", __func__, err);
+	json_object_object_add(req, "error", json_object_new_string(err));
+
 	return -1;
 }
 

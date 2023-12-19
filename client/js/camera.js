@@ -88,14 +88,40 @@ function yuv2CanvasImageData(canvas, data)
 
 function connect_camera_socket()
 {
+	let startTime = null;
+	let updateElapsedTimeCounter = 0;
+	const elapsedTimeFormat = { hour: "numeric", minute: "numeric", second: "numeric" };
+
 	const camera_callbacks = {
 		"camera-devices-get": camera_devices_get_response,
 	};
 
+	function update_elapsed_time() {
+		updateElapsedTimeCounter++;
+		if (updateElapsedTimeCounter < 5)
+			return;
+		updateElapsedTimeCounter = 0;
+
+		if (startTime == null)
+			startTime = new Date();
+
+		// VanillaJS way of formatting 00:00:00 time
+		let nowTime = new Date();
+		let elapsedTotal = Math.floor((nowTime - startTime) / 1000); // seconds
+		let seconds = elapsedTotal % 60;
+		elapsedTotal = Math.floor(elapsedTotal / 60);                // minutes
+		let minutes = elapsedTotal % 60;
+		let hours = Math.floor(elapsedTotal / 60);                   // hours
+		let elem = document.getElementById("camera_elapsed_time");
+		elem.innerHTML = hours.toString().padStart(2, '0') + ":" +
+				 minutes.toString().padStart(2, '0') + ":" +
+				 seconds.toString().padStart(2, '0');
+	}
+
 	function handle_binary_response(msg) {
 		let canvas = document.getElementById("default_canvas");
-
 		yuv2CanvasImageData(canvas, msg.data);
+		update_elapsed_time();
 	}
 
 	let imgElem = document.createElement("img");
@@ -110,6 +136,7 @@ function connect_camera_socket()
 		imgElem.src = "data:image/jpeg;base64," + base64Image;
 
 		context.drawImage(imgElem, 0, 0, 640, 480);
+		update_elapsed_time();
 	}
 
 	function handle_json_response(msg) {

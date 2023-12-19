@@ -19,3 +19,9 @@ p {
 .movie_canvas {
 	background-color: darkgray;
 }
+
+.now_time {
+	font-weight: bold;
+	font-size: 18px;
+	margin-left: 12px;
+}

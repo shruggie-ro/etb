@@ -305,20 +305,11 @@ err_msg:
 	return -1;
 }
 
-void camera_dev_play_stop(json_object *req)
+static void camera_dev_play_stop(struct camera_entry *cam)
 {
-	struct camera_entry *cam;
-	json_object *jval;
-	const char *dev;
 	int i;
 
-	jval = json_object_object_get(req, "value");
-	dev = json_object_get_string(json_object_object_get(jval, "device"));
-	if (!dev)
-		return;
-
-	cam = camera_find_active(dev, NULL);
-	if (!cam)
+	if (cam->dev_name[0] == '\0')
 		return;
 
 	camera_streaming_set_on(cam->fd, false);
@@ -329,6 +320,36 @@ void camera_dev_play_stop(json_object *req)
 
 	for (i = 0; i < NUM_MAX_CAPTURE_BUFS; i++)
 		munmap(cam->buffers[i].ptr, cam->buffers[i].length);
+}
+
+void camera_dev_play_stop_by_id(int cam_id)
+{
+	struct camera_entry *cam;
+
+	if (cam_id < 0 || cam_id >= NUM_MAX_CAMERAS)
+		return;
+
+	cam = &camera_active_list[cam_id];
+
+	camera_dev_play_stop(cam);
+}
+
+void camera_dev_play_stop_req(json_object *req)
+{
+	struct camera_entry *cam;
+	json_object *jval;
+	const char *dev;
+
+	jval = json_object_object_get(req, "value");
+	dev = json_object_get_string(json_object_object_get(jval, "device"));
+	if (!dev)
+		return;
+
+	cam = camera_find_active(dev, NULL);
+	if (!cam)
+		return;
+
+	camera_dev_play_stop(cam);
 }
 
 int camera_dev_acquire_capture_buffer(int cam_id, struct camera_buffer *buf)

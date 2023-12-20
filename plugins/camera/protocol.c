@@ -97,7 +97,7 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 				send_req_back_as_reply = true;
 			break;
 		case CAMERA_CMD_DEVICE_STOP:
-			camera_dev_play_stop(req);
+			camera_dev_play_stop_req(req);
 			pss->cam_id = -1;
 			break;
 		default:
@@ -329,6 +329,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 	case LWS_CALLBACK_CLOSED:
 		lwsl_info("camera: client disconnected\n");
+		camera_dev_play_stop_by_id(pss->cam_id);
 		tjDestroy(pss->tjpeg_handle);
 		lws_ring_destroy(pss->ring);
 		break;

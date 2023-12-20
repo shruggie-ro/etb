@@ -11,7 +11,8 @@ struct camera_buffer {
 
 int camera_devices_get(json_object *req);
 int camera_dev_play_start(json_object *req);
-void camera_dev_play_stop(json_object *req);
+void camera_dev_play_stop_req(json_object *req);
+void camera_dev_play_stop_by_id(int cam_id);
 
 int camera_dev_acquire_capture_buffer(int cam_id, struct camera_buffer *buf);
 void camera_dev_release_capture_buffer(int cam_id, struct camera_buffer *buf);

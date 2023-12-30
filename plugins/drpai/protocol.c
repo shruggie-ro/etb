@@ -5,25 +5,36 @@
 #include <json-c/json.h>
 
 #include "protocol.h"
-#include "camera.h"
-#include "../drpai/drpai.h"
+#include "drpai.h"
 
 #define RING_DEPTH 4096
 
-/* one of these created for each message */
+/* FIXME: hack to share state between camera and DRP AI */
+static bool drpai_running = false;
+static struct drpai *drpai = NULL;
+int drpai_model_run_and_wait_hack(void *addr, json_object *result)
+{
+	if (!drpai || !drpai_running)
+		return 0;
+	return drpai_model_run_and_wait(drpai, addr, result);
+}
 
 enum command {
 	CMD_INVALID = -1,
-	CMD_DEVICES_GET = 0,
-	CMD_DEVICE_PLAY,
-	CMD_DEVICE_STOP,
+	CMD_MODELS_GET,
+	CMD_MODEL_UPLOAD,
+	CMD_MODEL_START,
+	CMD_MODEL_STOP,
+	CMD_MODEL_DELETE,
 	CMD_MAX,
 };
 
 static const char *command_names[] = {
-	[CMD_DEVICES_GET] = "camera-devices-get",
-	[CMD_DEVICE_PLAY] = "camera-device-play",
-	[CMD_DEVICE_STOP] = "camera-device-stop",
+	[CMD_MODELS_GET]   = "drpai-models-get",
+	[CMD_MODEL_UPLOAD] = "drpai-model-upload",
+	[CMD_MODEL_START]  = "drpai-model-start",
+	[CMD_MODEL_STOP]   = "drpai-model-stop",
+	[CMD_MODEL_DELETE] = "drpai-model-delete",
 };
 
 struct msg {
@@ -31,7 +42,7 @@ struct msg {
 	uint8_t *send_buf;
 };
 
-struct vhd_camera {
+struct vhd_drpai {
 	struct lws_context *context;
 	struct lws_vhost *vhost;
 };
@@ -62,7 +73,7 @@ static enum command protocol_get_command_enum(const char *cmd)
 	return CMD_INVALID;
 }
 
-static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__camera *pss,
+static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__drpai *pss,
 				    void *in, size_t len)
 {
 	json_object *req = NULL;
@@ -84,20 +95,16 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	}
 
 	switch (cmd) {
-		case CMD_DEVICES_GET:
+		case CMD_MODELS_GET:
 			send_req_back_as_reply = true;
-			camera_devices_get(req);
+			drpai_models_get(req);
 			break;
-		case CMD_DEVICE_PLAY:
-			pss->cam_id = camera_dev_play_start(req);
-			if (pss->cam_id > -1)
-				lws_callback_on_writable(wsi);
-			else
-				send_req_back_as_reply = true;
+		case CMD_MODEL_START:
+			if (drpai_load_model(pss->drpai, req) == 0)
+				drpai_running = true;
 			break;
-		case CMD_DEVICE_STOP:
-			camera_dev_play_stop_req(req);
-			pss->cam_id = -1;
+		case CMD_MODEL_STOP:
+			drpai_running = false;
 			break;
 		default:
 			break;
@@ -127,7 +134,7 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	return 0;
 }
 
-static int handle_outgoing_message(struct lws *wsi, struct per_session_data__camera *pss)
+static int handle_outgoing_message(struct lws *wsi, struct per_session_data__drpai *pss)
 {
 	struct msg *pmsg;
 	int m, n, flags;
@@ -170,131 +177,45 @@ static int handle_outgoing_message(struct lws *wsi, struct per_session_data__cam
 	return 0;
 }
 
-static void handle_video_drpai(struct lws *wsi, struct per_session_data__camera *pss, void *buf)
+int callback_drpai(struct lws *wsi, enum lws_callback_reasons reason,
+		   void *user, void *in, size_t len)
 {
-	uint8_t *send_buf;
-	const char *s;
-	size_t slen;
-	json_object *drpai_result = json_object_new_object();
-	int m, n, flags;
-
-	drpai_model_run_and_wait_hack(buf, drpai_result);
-
-	s = json_object_to_json_string_length(drpai_result, 0, &slen);
-	if (!s) {
-		lwsl_warn(" (invalid DRP AI json object)\n");
-		return;
-	}
-
-	n = slen;
-	send_buf = malloc(n + LWS_PRE);
-	if (!send_buf) {
-		lwsl_warn(" (could not allocate send buffer)\n");
-		json_object_put(drpai_result);
-		return;
-	}
-
-	memcpy(send_buf + LWS_PRE, s, n);
-
-	// FIXME: hardcoded
-	flags = lws_write_ws_flags(LWS_WRITE_TEXT, 1, 1);
-
-	m = lws_write(wsi, send_buf + LWS_PRE, n, flags);
-	if (m < n)
-		lwsl_err("ERROR %d writing to ws socket\n", m);
-
-	json_object_put(drpai_result);
-}
-
-static int handle_video_stream_out(struct lws *wsi, struct per_session_data__camera *pss)
-{
-	struct camera_buffer buf = {};
-	struct msg amsg = {};
-	uint8_t *outbuf;
-	size_t jpeg_buflen = 0;
-	int m, n, flags;
-
-	if (camera_dev_acquire_capture_buffer(pss->cam_id, &buf)) {
-		lwsl_err(" (got null buffer from camera)\n");
-		return -1;
-	}
-
-	// FIXME: (hack) separate this nicer
-	handle_video_drpai(wsi, pss, buf.ptr);
-
-	outbuf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr, 640, 480,
-				     2, 1, 75, &jpeg_buflen);
-	if (!outbuf) {
-		lwsl_warn(" (could not compress jpeg)\n");
-		return -1;
-	}
-
-	n = jpeg_buflen;
-	amsg.send_buf = malloc(n + LWS_PRE);
-	if (!amsg.send_buf) {
-		tjFree(outbuf);
-		lwsl_warn(" (could not allocate send buffer)\n");
-		return -1;
-	}
-
-	memcpy(amsg.send_buf + LWS_PRE, outbuf, n);
-	tjFree(outbuf);
-
-	// FIXME: hardcoded
-	flags = lws_write_ws_flags(LWS_WRITE_BINARY, 1, 1);
-
-	m = lws_write(wsi, amsg.send_buf + LWS_PRE, n, flags);
-	if (m < n) {
-		lwsl_err("ERROR %d writing to ws socket\n", m);
-		return -1;
-	}
-
-	camera_dev_release_capture_buffer(pss->cam_id, &buf);
-
-	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
-
-	return 0;
-}
-
-int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
-		    void *user, void *in, size_t len)
-{
-	struct per_session_data__camera *pss = user;
-	struct vhd_camera *vhd = lws_protocol_vh_priv_get(lws_get_vhost(wsi),
-							   lws_get_protocol(wsi));
-	int n;
+	struct per_session_data__drpai *pss = user;
+	struct vhd_drpai *vhd = lws_protocol_vh_priv_get(lws_get_vhost(wsi),
+							 lws_get_protocol(wsi));
+	int n, rc;
 
 	switch (reason) {
 
 	case LWS_CALLBACK_PROTOCOL_INIT:
 		vhd = lws_protocol_vh_priv_zalloc(lws_get_vhost(wsi),
 				lws_get_protocol(wsi),
-				sizeof(struct vhd_camera));
+				sizeof(struct vhd_drpai));
 		if (!vhd)
 			return -1;
 
 		vhd->context = lws_get_context(wsi);
 		vhd->vhost = lws_get_vhost(wsi);
 
-		lwsl_info("camera: protocol initialized\n");
+		lwsl_info("drpai: protocol initialized\n");
 		break;
 
 	case LWS_CALLBACK_ESTABLISHED:
-		lwsl_info("camera: client connected\n");
+		lwsl_info("drpai: client connected\n");
 		pss->ring = lws_ring_create(sizeof(struct msg), RING_DEPTH,
 					    __destroy_message);
 		if (!pss->ring)
 			return 1;
 
-		/* FIXME: fallback to RAW? */
-		pss->tjpeg_handle = tjInitCompress();
-		if (!pss->tjpeg_handle) {
-			lwsl_warn("%s: could not initialize turbo-jpeg: %s\n",
-				  __func__, tjGetErrorStr());
-			return -1;
+		pss->drpai = drpai_init(&rc);
+		if (!pss->drpai) {
+			lwsl_warn("%s: could not initialize DRP AI: %d\n",
+				  __func__, rc);
+			return 1;
 		}
+		// FIXME: hack
+		drpai = pss->drpai;
 
-		pss->cam_id = -1;
 		pss->tail = 0;
 		break;
 
@@ -308,11 +229,8 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 			pss->write_consume_pending = 0;
 		}
 
-		if ((handle_outgoing_message(wsi, pss) < 0) && (pss->cam_id < 0))
+		if ((handle_outgoing_message(wsi, pss) < 0))
 			break;
-
-		if (pss->cam_id > -1)
-			handle_video_stream_out(wsi, pss);
 
 		/*
 		 * Workaround deferred deflate in pmd extension by only
@@ -347,7 +265,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 		}
 
 		if (lws_frame_is_binary(wsi)) {
-			lwsl_warn("camera: got binary data; dropping\n");
+			lwsl_warn("drpai: got binary data; dropping\n");
 			break;
 		}
 
@@ -368,9 +286,11 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 		break;
 
 	case LWS_CALLBACK_CLOSED:
-		lwsl_info("camera: client disconnected\n");
-		camera_dev_play_stop_by_id(pss->cam_id);
-		tjDestroy(pss->tjpeg_handle);
+		lwsl_info("drpai: client disconnected\n");
+		drpai_free(pss->drpai);
+		pss->drpai = NULL;
+		// FIXME: hack
+		drpai = NULL;
 		lws_ring_destroy(pss->ring);
 		break;
 

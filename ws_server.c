@@ -6,6 +6,7 @@
 
 #include "ws_server.h"
 #include "plugins/camera/protocol.h"
+#include "plugins/drpai/protocol.h"
 
 #define LWS_PROTOCOL_HTTP_DEFAULT \
 	{ "http", lws_callback_http_dummy, 0, 0, 0, NULL, 0}
@@ -21,6 +22,7 @@ struct ws_server {
 static struct lws_protocols protocols[] = {
 	LWS_PROTOCOL_HTTP_DEFAULT,
 	LWS_PLUGIN_PROTOCOL_CAMERA,
+	LWS_PLUGIN_PROTOCOL_DRPAI,
 	LWS_PROTOCOL_LIST_TERM
 };
 

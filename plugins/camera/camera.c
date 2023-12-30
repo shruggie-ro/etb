@@ -173,12 +173,12 @@ int camera_devices_get(json_object *req)
 {
 	char dev_name[DEV_NAME_MAX_SIZE];
 	struct v4l2_capability caps;
-	json_object *cam_arr;
+	json_object *arr;
 	int i, fd, ret;
 	const char *err = NULL;
 
-	cam_arr = json_object_new_array();
-	if (!cam_arr) {
+	arr = json_object_new_array();
+	if (!arr) {
 		err = "error creating JSON array";
 		goto err;
 	}
@@ -209,10 +209,10 @@ int camera_devices_get(json_object *req)
 		json_object_object_add(e, "capabilities", json_object_new_int(caps.capabilities));;
 		json_object_object_add(e, "device_caps", json_object_new_int(caps.device_caps));
 
-		json_object_array_add(cam_arr, e);
+		json_object_array_add(arr, e);
 	}
 
-	json_object_object_add(req, "value", cam_arr);
+	json_object_object_add(req, "value", arr);
 
 	return 0;
 err:

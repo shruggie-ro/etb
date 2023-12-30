@@ -1,15 +1,15 @@
 
 function camera_device_play_toggle(ws, ev)
 {
-	var cam_sel = document.getElementById("camera_device_sel");
+	var sel = document.getElementById("camera_device_sel");
 	var play = (ev.currentTarget.value == "Play");
 
 	const msg_json = {
 		"name" : play ? "camera-device-play" : "camera-device-stop",
-		"value" : { "device": cam_sel.value },
+		"value" : { "device": sel.value },
 	};
 
-	cam_sel.disabled = play;
+	sel.disabled = play;
 
 	ws.send(JSON.stringify(msg_json));
 
@@ -19,9 +19,8 @@ function camera_device_play_toggle(ws, ev)
 
 function camera_device_selection_change(ev)
 {
-	var cam_play = document.getElementById("camera_device_play");
-	var val = ev.currentTarget.value;
-	cam_play.disabled = (val == "");
+	var play = document.getElementById("camera_device_play");
+	play.disabled = (ev.currentTarget.value == "");
 }
 
 function camera_devices_get_request(ws)
@@ -32,12 +31,12 @@ function camera_devices_get_request(ws)
 
 function camera_devices_get_response(ws, msg)
 {
-	var cam_sel = document.getElementById("camera_device_sel");
-	var cam_play = document.getElementById("camera_device_play");
+	var sel = document.getElementById("camera_device_sel");
+	var play = document.getElementById("camera_device_play");
 
 	if (!Array.isArray(msg) || msg.length == 0) {
-		cam_sel.innerHTML = '<option value="" hidden>No camera device...</option>';
-		cam_play.disabled = true;
+		sel.innerHTML = '<option value="" hidden>No camera device...</option>';
+		play.disabled = true;
 		return;
 	}
 
@@ -47,11 +46,11 @@ function camera_devices_get_response(ws, msg)
 	}
 
 	// Register event listener when camera device changes
-	cam_sel.innerHTML = devices.join();
-	cam_sel.addEventListener('change', camera_device_selection_change);
+	sel.innerHTML = devices.join();
+	sel.addEventListener('change', camera_device_selection_change);
 
 	// Register event listener when the play button gets pushed
-	cam_play.addEventListener('click', function(ev) {
+	play.addEventListener('click', function(ev) {
 		camera_device_play_toggle(ws, ev);
 	});
 }
@@ -92,7 +91,7 @@ function connect_camera_socket()
 	let updateElapsedTimeCounter = 0;
 	const elapsedTimeFormat = { hour: "numeric", minute: "numeric", second: "numeric" };
 
-	const camera_callbacks = {
+	const callbacks = {
 		"camera-devices-get": camera_devices_get_response,
 	};
 
@@ -143,9 +142,9 @@ function connect_camera_socket()
 		var msg = JSON.parse(msg.data);
 		if (!Object.hasOwn(msg, 'name'))
 			return;
-		if (!Object.hasOwn(camera_callbacks, msg.name))
+		if (!Object.hasOwn(callbacks, msg.name))
 			return;
-		let cb = camera_callbacks[msg.name];
+		let cb = callbacks[msg.name];
 		cb(ws, Object.hasOwn(msg, "value") ? msg.value : null);
 	}
 

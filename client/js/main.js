@@ -39,6 +39,7 @@ function load_js_script(url) {
 
 const js_scripts = [
 	"camera.js",
+	"drpai.js",
 ];
 
 js_scripts.forEach(load_js_script);

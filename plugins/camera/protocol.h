@@ -1,6 +1,7 @@
 #ifndef __PROTOCOL_CAMERA_H__
 #define __PROTOCOL_CAMERA_H__
 
+#include <stdbool.h>
 #include <libwebsockets.h>
 #include "jpeg.h"
 

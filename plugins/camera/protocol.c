@@ -12,17 +12,17 @@
 /* one of these created for each message */
 
 enum command {
-	CAMERA_CMD_INVALID = -1,
-	CAMERA_CMD_DEVICES_GET = 0,
-	CAMERA_CMD_DEVICE_PLAY,
-	CAMERA_CMD_DEVICE_STOP,
-	CAMERA_CMD_MAX,
+	CMD_INVALID = -1,
+	CMD_DEVICES_GET = 0,
+	CMD_DEVICE_PLAY,
+	CMD_DEVICE_STOP,
+	CMD_MAX,
 };
 
 static const char *command_names[] = {
-	[CAMERA_CMD_DEVICES_GET] = "camera-devices-get",
-	[CAMERA_CMD_DEVICE_PLAY] = "camera-device-play",
-	[CAMERA_CMD_DEVICE_STOP] = "camera-device-stop",
+	[CMD_DEVICES_GET] = "camera-devices-get",
+	[CMD_DEVICE_PLAY] = "camera-device-play",
+	[CMD_DEVICE_STOP] = "camera-device-stop",
 };
 
 struct msg {
@@ -51,14 +51,14 @@ static enum command protocol_get_command_enum(const char *cmd)
 	int i;
 
 	if (!cmd)
-		return CAMERA_CMD_INVALID;
+		return CMD_INVALID;
 
-	for (i = 0; i < CAMERA_CMD_MAX; i++) {
+	for (i = 0; i < CMD_MAX; i++) {
 		if (strcmp(cmd, command_names[i]) == 0)
 			return i;
 	}
 
-	return CAMERA_CMD_INVALID;
+	return CMD_INVALID;
 }
 
 static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__camera *pss,
@@ -67,7 +67,7 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	json_object *req = NULL;
 	struct msg amsg;
 	bool first, final;
-	enum command cmd = CAMERA_CMD_INVALID;
+	enum command cmd = CMD_INVALID;
 	bool send_req_back_as_reply = false;
 
 	first = lws_is_first_fragment(wsi);
@@ -84,19 +84,19 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	}
 
 	switch (cmd) {
-		case CAMERA_CMD_DEVICES_GET:
+		case CMD_DEVICES_GET:
 			json_object_get(req);
 			send_req_back_as_reply = true;
 			camera_devices_get(req);
 			break;
-		case CAMERA_CMD_DEVICE_PLAY:
+		case CMD_DEVICE_PLAY:
 			pss->cam_id = camera_dev_play_start(req);
 			if (pss->cam_id > -1)
 				lws_callback_on_writable(wsi);
 			else
 				send_req_back_as_reply = true;
 			break;
-		case CAMERA_CMD_DEVICE_STOP:
+		case CMD_DEVICE_STOP:
 			camera_dev_play_stop_req(req);
 			pss->cam_id = -1;
 			break;

@@ -6,7 +6,8 @@
 struct drpai;
 
 enum model_type {
-	MODEL_YOLOV3,
+	MODEL_TYPE_INVALID = -1,
+	MODEL_TYPE_YOLOV3,
 };
 
 struct drpai *drpai_init(int *err);

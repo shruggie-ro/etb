@@ -1,15 +1,17 @@
 
 function drpai_model_start_toggle(ws, ev)
 {
-	var sel = document.getElementById("drpai_model_sel");
+	var model = document.getElementById("drpai_model_sel");
+	var type = document.getElementById("drpai_model_type_sel");
 	var play = (ev.currentTarget.value == "Start");
 
 	const msg_json = {
 		"name" : play ? "drpai-model-start" : "drpai-model-stop",
-		"value" : { "model": sel.value },
+		"value" : { "model": model.value, "type": type.value },
 	};
 
-	sel.disabled = play;
+	model.disabled = play;
+	type.disabled = play;
 
 	ws.send(JSON.stringify(msg_json));
 
@@ -28,19 +30,20 @@ function drpai_models_get_request(ws) {
 	ws.send(JSON.stringify(msg_json));
 }
 
-function drpai_models_get_response(ws, msg)
+function drpai_models_populate_model_names(ws, msg)
 {
 	var sel = document.getElementById("drpai_model_sel");
 	var start = document.getElementById("drpai_model_start");
 
-	if (!Array.isArray(msg) || msg.length == 0) {
-		sel.innerHTML = '<option value="" hidden>No model...</option>';
-		start.disabled = true;
+	start.disabled = true;
+
+	if (!Array.isArray(msg.models) || msg.models.length == 0) {
+		sel.innerHTML = '<option value="" hidden>No models available...</option>';
 		return;
 	}
 
 	var models = [ "<option value='' selected>Select model...</option>" ];
-	for (let model of msg) {
+	for (let model of msg.models) {
 		models.push(`<option value="${model}">${model}</option>`);
 	}
 
@@ -51,6 +54,29 @@ function drpai_models_get_response(ws, msg)
 	start.addEventListener('click', function(ev) {
 		drpai_model_start_toggle(ws, ev);
 	});
+}
+
+function drpai_models_populate_model_types(msg)
+{
+	var sel = document.getElementById("drpai_model_type_sel");
+
+	if (!Array.isArray(msg.model_types) || msg.model_types.length == 0) {
+		sel.innerHTML = '<option value="" hidden>No model types available...</option>';
+		return;
+	}
+
+	var types = [];
+	for (let type of msg.model_types) {
+		types.push(`<option value="${type}">${type}</option>`);
+	}
+
+	sel.innerHTML = types.join();
+}
+
+function drpai_models_get_response(ws, msg)
+{
+	drpai_models_populate_model_names(ws, msg);
+	drpai_models_populate_model_types(msg);
 }
 
 function connect_drpai_socket()

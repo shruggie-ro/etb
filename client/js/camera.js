@@ -34,9 +34,10 @@ function camera_devices_get_response(ws, msg)
 	var sel = document.getElementById("camera_device_sel");
 	var play = document.getElementById("camera_device_play");
 
+	play.disabled = true;
+
 	if (!Array.isArray(msg) || msg.length == 0) {
 		sel.innerHTML = '<option value="" hidden>No camera device...</option>';
-		play.disabled = true;
 		return;
 	}
 

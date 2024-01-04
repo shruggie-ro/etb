@@ -6,15 +6,46 @@
 #include <stdio.h>
 #include <string.h>
 
+static const char *model_type_names[] = {
+	[MODEL_TYPE_YOLOV3] = "YOLOv3",
+	NULL
+};
+
 const struct drpai_model *drpai_model_type_enum_to_ops(enum model_type type)
 {
 	switch(type) {
-		case MODEL_YOLOV3: return &yolov3_model;
+		case MODEL_TYPE_YOLOV3: return &yolov3_model;
 		default: return NULL;
 	}
 }
 
-#include <libwebsockets.h>
+enum model_type drpai_model_name_to_enum(const char *name)
+{
+	int i;
+
+	for (i = 0; model_type_names[i]; i++) {
+		if (strcmp(name, model_type_names[i]))
+			continue;
+		return i;
+	}
+
+	return MODEL_TYPE_INVALID;
+}
+
+json_object *drpai_model_types_get()
+{
+	json_object *arr;
+	int i;
+
+	arr = json_object_new_array();
+	if (!arr)
+		return NULL;
+
+	for (i = 0; model_type_names[i]; i++)
+		json_object_array_add(arr, json_object_new_string(model_type_names[i]));
+
+	return arr;
+}
 
 char **drpai_load_labels_from_file(const char *model, const char *fname, int *ret)
 {

@@ -258,18 +258,25 @@ out_closedir:
 
 int drpai_load_model(struct drpai *d, json_object *req)
 {
+	const char *model, *type;
 	json_object *jval;
-	const char *model;
 	int rc;
 
 	jval = json_object_object_get(req, "value");
 	model = json_object_get_string(json_object_object_get(jval, "model"));
-	if (!model) {
+	type = json_object_get_string(json_object_object_get(jval, "type"));
+	if (!model || !type) {
 		rc = -EINVAL;
 		goto err;
 	}
 
-	rc = __drpai_load_model(d, model, MODEL_YOLOV3);
+	rc = drpai_model_name_to_enum(type);
+	if (rc < 0) {
+		rc = -EINVAL;
+		goto err;
+	}
+
+	rc = __drpai_load_model(d, model, rc);
 err:
 	if (rc) {
 		const char *err = strerror(-rc);
@@ -470,8 +477,9 @@ err:
 
 int drpai_models_get(json_object *req)
 {
+	json_object *val = NULL;
 	struct dirent *ep;
-	json_object *arr;
+	json_object *models, *types;
 	const char *err;
 	DIR *dp;
 
@@ -481,11 +489,27 @@ int drpai_models_get(json_object *req)
 		goto err;
 	}
 
-	arr = json_object_new_array();
-	if (!arr) {
-		err = "error creating JSON array";
+	val = json_object_new_object();
+	if (!val) {
+		err = "error allocating JSON object";
 		goto err;
 	}
+
+	/* allocate JSON array for model names */
+	models = json_object_new_array();
+	if (!models) {
+		err = "error creating JSON array for model names";
+		goto err;
+	}
+	json_object_object_add(val, "models", models);
+
+	/* allocate JSON array for model types */
+	types = drpai_model_types_get();
+	if (!types) {
+		err = "error creating JSON array for model types";
+		goto err;
+	}
+	json_object_object_add(val, "model_types", types);
 
 	while ((ep = readdir(dp))) {
 		if (ep->d_type != DT_DIR)
@@ -497,15 +521,16 @@ int drpai_models_get(json_object *req)
 		if (strcmp(ep->d_name, "..") == 0)
 			continue;
 
-		json_object_array_add(arr, json_object_new_string(ep->d_name));
+		json_object_array_add(models, json_object_new_string(ep->d_name));
 	}
 
-	json_object_object_add(req, "value", arr);
+	json_object_object_add(req, "value", val);
 
 	closedir(dp);
 
 	return 0;
 err:
+	json_object_put(val);
 	closedir(dp);
 	json_object_object_add(req, "error", json_object_new_string(err));
 	lwsl_err("%s: %s\n", __func__, err);

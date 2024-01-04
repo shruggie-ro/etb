@@ -475,6 +475,50 @@ err:
 	return -1;
 }
 
+static bool drpai_model_has_required_files(const char *name)
+{
+	bool required_files[DRPAI_INDEX_NUM];
+	bool have_addrmap_file = false;
+	struct dirent *ep;
+	char path[512];
+	DIR *dp;
+
+	snprintf(path, sizeof(path), "%s/%s", DRPAI_MODELS_ROOT_DIR, name);
+
+	dp = opendir(path);
+	if (!dp)
+		return false;
+
+	while ((ep = readdir(dp))) {
+		int idx;
+		if (strcmp(ep->d_name, ".") == 0)
+			continue;
+
+		if (strcmp(ep->d_name, "..") == 0)
+			continue;
+
+		if (str_endswith(ep->d_name, ADDRMAP_INTM_TXT_FILTER)) {
+			have_addrmap_file = true;
+			continue;
+		}
+
+		idx = drpai_find_index(ep->d_name);
+		if (idx < 0)
+			continue;
+
+		required_files[idx] = true;
+	}
+
+	closedir(dp);
+
+	return required_files[DRPAI_INDEX_DRP_CFG] &&
+		required_files[DRPAI_INDEX_AIMAC_DESC] &&
+		required_files[DRPAI_INDEX_DRP_DESC] &&
+		required_files[DRPAI_INDEX_DRP_PARAM] &&
+		required_files[DRPAI_INDEX_WEIGHT] &&
+		have_addrmap_file;
+}
+
 int drpai_models_get(json_object *req)
 {
 	json_object *val = NULL;
@@ -519,6 +563,9 @@ int drpai_models_get(json_object *req)
 			continue;
 
 		if (strcmp(ep->d_name, "..") == 0)
+			continue;
+
+		if (!drpai_model_has_required_files(ep->d_name))
 			continue;
 
 		json_object_array_add(models, json_object_new_string(ep->d_name));

@@ -1,8 +1,12 @@
 #ifndef __MODELS_H__
 #define __MODELS_H__
 
-#include "drpai.h"
 #include <json-c/json.h>
+
+enum model_type {
+	MODEL_TYPE_INVALID = -1,
+	MODEL_TYPE_YOLOV3,
+};
 
 struct drpai_model {
 	void *(*init)(const char *name, int *err);

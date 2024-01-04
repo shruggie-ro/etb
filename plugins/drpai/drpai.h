@@ -2,13 +2,9 @@
 #define __DRPAI_H__
 
 #include <json-c/json.h>
+#include "models.h"
 
 struct drpai;
-
-enum model_type {
-	MODEL_TYPE_INVALID = -1,
-	MODEL_TYPE_YOLOV3,
-};
 
 struct drpai *drpai_init(int *err);
 void drpai_free(struct drpai *d);

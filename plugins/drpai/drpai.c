@@ -13,6 +13,8 @@
 #include <dirent.h>
 #include <stdbool.h>
 
+#include <sys/mman.h>
+
 #include "drpai.h"
 #include "models.h"
 
@@ -36,6 +38,12 @@ struct drpai {
 	int fd;
 	const struct drpai_model *model;
 	void *model_params;
+	struct {
+		int fd;
+		uint32_t base;
+		uint32_t input;
+		void *usrptr;
+	} udmabuf;
 };
 
 static const struct drpai_param_map drpai_param_map[] = {
@@ -297,6 +305,55 @@ static int drpai_get_base_addr(struct drpai *d)
 	return rc ? -errno : 0;
 }
 
+/**
+ * This uses the u-dma-buf driver found here:
+ *    https://github.com/ikwzm/udmabuf
+ * For the current DRP AI driver, we need to know the
+ * physical address of the where we place the input data,
+ * as well as an mmap()-ed pointer to the same location,
+ * to be able to memcpy() data.
+ * This driver works fine, because most embedded systems
+ * have less than 4 GB of RAM.
+ *
+ * FIXME: we could do a zero-copy version here using the same
+ *        u-dma-buf, but since the u-dma-buf is not part of the
+ *        standard/base kernel source code: ¯\_(ツ)_/¯
+ */
+static int drpai_get_input_mem_addr(struct drpai *d)
+{
+	/* FIXME: 'input_mem_offset is chosen arbitrarily at this point */
+	const uint32_t input_mem_offset = 0x1000000;
+	char buf[32];
+	int fd, rc;
+
+	fd = open("/sys/class/u-dma-buf/udmabuf0/phys_addr", O_RDONLY);
+	if (fd < 0)
+		return -errno;
+
+	rc = read(fd, buf, sizeof(buf));
+	close(fd);
+	if (rc < 0)
+		return -errno;
+
+	d->udmabuf.base = strtoul(buf, NULL, 16) & 0xffffffff;
+	d->udmabuf.input = d->udmabuf.base + input_mem_offset;
+
+	fd = open("/dev/udmabuf0", O_RDWR);
+	if (fd < 0)
+		return -errno;
+
+	d->udmabuf.fd = fd;
+	/* FIXME: size is hard-coded */
+	d->udmabuf.usrptr = mmap(NULL, 640 * 480 * 2, PROT_READ | PROT_WRITE,
+				 MAP_SHARED, fd, input_mem_offset);
+	if (d->udmabuf.usrptr == MAP_FAILED) {
+		close(fd);
+		return -errno;
+	}
+
+	return 0;
+}
+
 struct drpai *drpai_init(int *err)
 {
 	struct drpai *d;
@@ -317,6 +374,9 @@ struct drpai *drpai_init(int *err)
 	if ((lerr = drpai_get_base_addr(d)))
 		goto err_close;
 
+	if ((lerr = drpai_get_input_mem_addr(d)))
+		goto err_close;
+
 	return d;
 err_close:
 	close(d->fd);
@@ -333,6 +393,7 @@ void drpai_free(struct drpai *d)
 	if (!d)
 		return;
 
+	close(d->udmabuf.fd);
 	close(d->fd);
 	if (d->model && d->model->cleanup)
 		d->model->cleanup(d->model_params);
@@ -340,12 +401,14 @@ void drpai_free(struct drpai *d)
 	free(d);
 }
 
-static int drpai_start(struct drpai *d, void *addr)
+static int drpai_start(struct drpai *d, void *addr, size_t len)
 {
 	if (!d)
 		return -EINVAL;
 
-	d->input_data[DRPAI_INDEX_INPUT].address = (uintptr_t)addr;
+	/* FIXME: this provides the physical address */
+	d->input_data[DRPAI_INDEX_INPUT].address = d->udmabuf.input;
+	memcpy(d->udmabuf.usrptr, addr, len); /* copy the data */
 
 	if (ioctl(d->fd, DRPAI_START, d->input_data))
 		return -errno;
@@ -433,7 +496,7 @@ int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
 		goto err;
 	}
 
-	rc = drpai_start(d, addr);
+	rc = drpai_start(d, addr, 640 * 480 * 2); // FIXME: hard coded length
 	if (rc) {
 		lwsl_warn("%s %d err %s\n", __func__, __LINE__, strerror(-rc));
 		err = "DRP AI start error";

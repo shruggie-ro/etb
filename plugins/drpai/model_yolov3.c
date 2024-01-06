@@ -246,7 +246,7 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 
 static void *yolov3_init(const char *name, int *err)
 {
-	const char *fname = COCO_LABELS_FILENAME;
+	char label_file[128];
 	struct yolov3_model_params *p;
 	int lret = 0;
 
@@ -256,19 +256,29 @@ static void *yolov3_init(const char *name, int *err)
 		goto err_store;
 	}
 
-	p->labels = drpai_load_labels_from_file(name, fname, &lret);
-	if (lret < 0) {
-		/* Fallback to try to load the file from the models root dir */
-		p->labels = drpai_load_labels_from_file(NULL, fname, &lret);
-		if (lret < 0)
-			goto err_store;
+	snprintf(label_file, sizeof(label_file), "%s.txt", name);
+	p->labels = drpai_load_labels_from_file(NULL, label_file, &lret);
+	if (lret > 0) {
+		p->num_labels = lret;
+		return p;
 	}
+	free(p->labels);
 
-	p->num_labels = lret;
-	if (err)
-		*err = 0;
+	/* Try to load a 'labels.txt' from inside the model dir */
+	p->labels = drpai_load_labels_from_file(name, "labels.txt", &lret);
+	if (lret > 0) {
+		p->num_labels = lret;
+		return p;
+	}
+	free(p->labels);
 
-	return p;
+	p->labels = drpai_load_labels_from_file(name, COCO_LABELS_FILENAME, &lret);
+	if (lret > 0) {
+		p->num_labels = lret;
+		return p;
+	}
+	free(p->labels);
+
 err_store:
 	free(p);
 	if (err)

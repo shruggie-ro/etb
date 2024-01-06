@@ -183,7 +183,7 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 					if (num_detections >= allocated) {
 						void *oldptr = detections;
 						allocated += 32;
-						detections = realloc(detections, allocated);
+						detections = realloc(detections, allocated * sizeof(*detections));
 						if (!detections) {
 							free(oldptr);
 							return -ENOMEM;

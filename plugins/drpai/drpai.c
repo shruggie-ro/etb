@@ -503,26 +503,22 @@ int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
 		goto err;
 	}
 
-	lwsl_warn("%s %d\n", __func__, __LINE__);
 	timeout = 1000;
 	while (drp_is_running(d) && timeout-- > 0) {
 		usleep(5000);
 	}
 
-	lwsl_warn("%s %d timeout %d\n", __func__, __LINE__, timeout);
 	if (timeout <= 0) {
 		err = "DRP AI timeout";
 		goto err;
 	}
 
-	lwsl_warn("%s %d\n", __func__, __LINE__);
 	raw = drpai_get_result_raw(d, &rc);
 	if (!raw || rc) {
 		err = "DRP AI error retrieving result";
 		goto err;
 	}
 
-	lwsl_warn("%s %d\n", __func__, __LINE__);
 	/* FIXME: find a neat way to pass width, height */
 	rc = m->postprocessing(d->model_params, raw, 640, 480, result);
 	if (rc) {
@@ -530,7 +526,6 @@ int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
 		goto err;
 	}
 
-	lwsl_warn("%s %d\n", __func__, __LINE__);
 	return 0;
 err:
 	json_object_object_add(result, "error", json_object_new_string(err));

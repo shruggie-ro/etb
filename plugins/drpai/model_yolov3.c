@@ -28,9 +28,12 @@ struct detection {
 static const int num_grids[] = { 13, 26, 52 }; /* the number of elements should be YOLOV3_NUM_INF_OUT_LAYER */
 
 #define YOLOV3_NUM_BB			3
-#define YOLOV3_TH_PROB			0.5f
-#define YOLOV3_TH_NMS			0.5f
+#define YOLOV3_TH_PROB			0.3f /* FIXME: make YOLOV3_TH_PROB & YOLOV3_TH_NMS adjustable or convert this to JavaScript */
+#define YOLOV3_TH_NMS			0.3f
 #define COCO_LABELS_FILENAME		"coco-labels-2014_2017.txt"
+
+#define YOLOV3_MODEL_IN_W		416
+#define YOLOV3_MODEL_IN_H		416
 
 static const double anchors[] = {
 	10, 13,
@@ -129,10 +132,21 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 	struct detection *d, *detections = NULL;
 	int num_detections = 0, allocated = 0;
 	int num_class = p->num_labels;
-	float width_f = width;
-	float height_f = height;
 	int i, n, b, y, x, rc;
-	json_object *arr;
+	json_object *arr, *obj;
+
+	/* Following variables are required for correct_yolo/region_boxes in Darknet implementation*/
+	/* Note: This implementation refers to the "darknet detector test" */
+	float new_w, new_h;
+	const float correct_w = 1.;
+	const float correct_h = 1.;
+	if ((float)(YOLOV3_MODEL_IN_W / correct_w) < (float)(YOLOV3_MODEL_IN_H / correct_h)) {
+		new_w = (float)YOLOV3_MODEL_IN_W;
+		new_h = correct_h * YOLOV3_MODEL_IN_W / correct_w;
+	} else {
+		new_w = correct_w * YOLOV3_MODEL_IN_H / correct_h;
+		new_h = YOLOV3_MODEL_IN_H;
+	}
 
 	for (n = 0; n < YOLOV3_NUM_INF_OUT_LAYER; n++) {
 		int num_grid = num_grids[n];
@@ -147,23 +161,30 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 					float th = data[yolo_index(num_grid, offs, 3)];
 					float tc = data[yolo_index(num_grid, offs, 4)];
 
-					/* Compute the bounding box */
-					/* get_yolo_box/get_region_box in paper implementation*/
-					float center_x = ((float)x + sigmoid(tx)) / (float)num_grid;
-					float center_y = ((float)y + sigmoid(ty)) / (float)num_grid;
-					float box_w = (float)exp(tw) * anchors[anchor_offset + 2 * b + 0] / width_f;
-					float box_h = (float)exp(th) * anchors[anchor_offset + 2 * b + 1] / height_f;
-
 					float max_pred = 0;
 					int pred_class = -1;
 
 					float objectness = sigmoid(tc);
 					float probability;
 
-					center_x = round(center_x * width_f);
-					center_y = round(center_y * height_f);
-					box_w = round(box_w * width_f);
-					box_h = round(box_h * height_f);
+					/* Compute the bounding box */
+					/* get_yolo_box/get_region_box in paper implementation*/
+					float center_x = ((float)x + sigmoid(tx)) / (float)num_grid;
+					float center_y = ((float)y + sigmoid(ty)) / (float)num_grid;
+					float box_w = (float)exp(tw) * anchors[anchor_offset + 2 * b + 0] / (float)YOLOV3_MODEL_IN_W;
+					float box_h = (float)exp(th) * anchors[anchor_offset + 2 * b + 1] / (float)YOLOV3_MODEL_IN_H;
+
+					/* Adjustment for VGA size */
+					/* correct_yolo/region_boxes */
+					center_x = (center_x - (YOLOV3_MODEL_IN_W - new_w) / 2. / YOLOV3_MODEL_IN_W) / ((float)new_w / YOLOV3_MODEL_IN_W);
+					center_y = (center_y - (YOLOV3_MODEL_IN_H - new_h) / 2. / YOLOV3_MODEL_IN_H) / ((float)new_h / YOLOV3_MODEL_IN_H);
+					box_w *= (float)(YOLOV3_MODEL_IN_W / new_w);
+					box_h *= (float)(YOLOV3_MODEL_IN_H / new_h);
+
+					center_x = round(center_x * width);
+					center_y = round(center_y * height);
+					box_w = round(box_w * width);
+					box_h = round(box_h * height);
 
 					/* Get the class prediction */
 					for (i = 0; i < num_class; i++) {
@@ -195,7 +216,7 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 					d->box.w = box_w;
 					d->box.h = box_h;
 					d->box.x = (int)(center_x - (d->box.w / 2));
-					d->box.y = (int)(center_y - (d->box.y / 2));
+					d->box.y = (int)(center_y - (d->box.h / 2));
 					num_detections++;
 				}
 			}
@@ -204,28 +225,28 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 	/* Non-Maximum Supression filter */
 	filter_boxes_nms(detections, num_detections, YOLOV3_TH_NMS);
 
+	obj = json_object_new_object();
 	arr = json_object_new_array();
-	if (!arr) {
-		free(detections);
-		return -errno;
+	if (!arr || !obj) {
+		rc = -errno;
+		goto err;
 	}
-	json_object_object_add(result, "object_detection", arr);
+	json_object_object_add(result, "name", json_object_new_string("drpai-object-detection-result"));
+	json_object_object_add(result, "value", arr);
 
 	rc = 0;
 	for (i = 0; i < num_detections; i++) {
 		json_object *jobj, *jbox;
 		d = &detections[i];
-		if (d->probability == 0)
+		if (d->probability < YOLOV3_TH_PROB)
 			continue;
 		jobj = json_object_new_object();
-		if (!jobj) {
-			rc = -errno;
-			break;
-		}
 		jbox = json_object_new_object();
-		if (!jbox) {
+		if (!jobj || !jbox) {
+			json_object_put(jbox);
+			json_object_put(jobj);
 			rc = -errno;
-			break;
+			goto err;
 		}
 		n = d->pred_class;
 		json_object_object_add(jobj, "label", json_object_new_string(p->labels[n]));
@@ -241,6 +262,11 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
         }
 	free(detections);
 
+	return 0;
+err:
+	free(detections);
+	json_object_put(obj);
+	json_object_put(arr);
 	return rc;
 }
 

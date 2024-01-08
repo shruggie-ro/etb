@@ -1,4 +1,6 @@
 
+let predictionData = null; // FIXME hack
+
 function camera_device_play_toggle(ws, ev)
 {
 	var sel = document.getElementById("camera_device_sel");
@@ -86,6 +88,17 @@ function yuv2CanvasImageData(canvas, data)
 	context.putImageData(imgData, 0, 0);
 }
 
+// FIXME: hack to do this quickly
+function drpai_handle_object_detection_result(ws, msg)
+{
+	if (!Array.isArray(msg) || msg.length == 0) {
+		predictionData = null;
+		return;
+	}
+
+	predictionData = msg; // FIXME hack
+}
+
 function connect_camera_socket()
 {
 	let startTime = null;
@@ -94,6 +107,8 @@ function connect_camera_socket()
 
 	const callbacks = {
 		"camera-devices-get": camera_devices_get_response,
+		// FIXME: hack to do this quickly
+		"drpai-object-detection-result": drpai_handle_object_detection_result,
 	};
 
 	function update_elapsed_time() {
@@ -136,6 +151,20 @@ function connect_camera_socket()
 		imgElem.src = "data:image/jpeg;base64," + base64Image;
 
 		context.drawImage(imgElem, 0, 0, 640, 480);
+		if (predictionData) {
+			var data = predictionData;
+			context.linewidth = 16;
+			context.strokeStyle = 'blue';
+			context.fillStyle = 'blue';
+			context.font = "24pt";
+			for (i = 0; i < data.length; i++) {
+				var label = data[i].label;
+				var box = data[i].box;
+				context.strokeRect(box.x, box.y, box.w, box.h);
+				context.fillText(label, box.x, (box.y + 16));
+			}
+		}
+
 		update_elapsed_time();
 	}
 

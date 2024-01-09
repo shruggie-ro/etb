@@ -34,7 +34,7 @@ SET(SOURCES
 	plugins/camera/jpeg.c
 	plugins/camera/protocol.c
 	plugins/drpai/drpai.c
-	plugins/drpai/model_yolov3.c
+	plugins/drpai/model_yolo.c
 	plugins/drpai/models.c
 	plugins/drpai/protocol.c
 	main.c ws_server.c)

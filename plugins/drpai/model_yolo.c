@@ -6,7 +6,7 @@
 
 #include <libwebsockets.h>
 
-struct yolov3_model_params {
+struct yolo_model_params {
 	char **labels;
 	int num_labels;
 };
@@ -128,7 +128,7 @@ static void filter_boxes_nms(struct detection *d, int size, float th_nms)
 
 static int yolov3_postprocessing(void *model_params, float *data, int width, int height, json_object *result)
 {
-	struct yolov3_model_params *p = model_params;
+	struct yolo_model_params *p = model_params;
 	struct detection *d, *detections = NULL;
 	int num_detections = 0, allocated = 0;
 	int num_class = p->num_labels;
@@ -270,11 +270,17 @@ err:
 	return rc;
 }
 
-static void *yolov3_init(const char *name, int *err)
+static void *yolo_init(json_object *config, int *err)
 {
-	char label_file[128];
-	struct yolov3_model_params *p;
-	int lret = 0;
+	struct yolo_model_params *p = NULL;
+	json_object *jlabels;
+	int i, lret = 0;
+
+	jlabels = json_object_object_get(config, "labels");
+	if (!jlabels || !json_object_is_type(jlabels, json_type_array)) {
+		lret = -ENOENT;
+		goto err_store;
+	}
 
 	p = malloc(sizeof(*p));
 	if (!p) {
@@ -282,29 +288,21 @@ static void *yolov3_init(const char *name, int *err)
 		goto err_store;
 	}
 
-	snprintf(label_file, sizeof(label_file), "%s.txt", name);
-	p->labels = drpai_load_labels_from_file(NULL, label_file, &lret);
-	if (lret > 0) {
-		p->num_labels = lret;
-		return p;
+	p->num_labels = json_object_array_length(jlabels);
+	p->labels = malloc(sizeof(char*) * p->num_labels);
+	if (!p->labels) {
+		lret = -ENOMEM;
+		goto err_store;
 	}
-	free(p->labels);
 
-	/* Try to load a 'labels.txt' from inside the model dir */
-	p->labels = drpai_load_labels_from_file(name, "labels.txt", &lret);
-	if (lret > 0) {
-		p->num_labels = lret;
-		return p;
+	for (i = 0; i < p->num_labels; i++) {
+		json_object *e = json_object_array_get_idx(jlabels, i);
+		p->labels[i] = strdup(json_object_get_string(e));
 	}
-	free(p->labels);
 
-	p->labels = drpai_load_labels_from_file(name, COCO_LABELS_FILENAME, &lret);
-	if (lret > 0) {
-		p->num_labels = lret;
-		return p;
-	}
-	free(p->labels);
+	/* FIXME: add more customize-able YOLO params here */
 
+	return p;
 err_store:
 	free(p);
 	if (err)
@@ -312,9 +310,9 @@ err_store:
 	return NULL;
 }
 
-static void yolov3_cleanup(void *model_params)
+static void yolo_cleanup(void *model_params)
 {
-	struct yolov3_model_params *p = model_params;
+	struct yolo_model_params *p = model_params;
 	int i;
 
 	if (!p)
@@ -326,9 +324,9 @@ static void yolov3_cleanup(void *model_params)
 	free(p);
 }
 
-const struct drpai_model yolov3_model = {
-	.init = yolov3_init,
-	.cleanup = yolov3_cleanup,
+const struct drpai_model_ops yolo_model_ops = {
+	.init = yolo_init,
+	.cleanup = yolo_cleanup,
 	.postprocessing = yolov3_postprocessing,
 };
 

@@ -6,47 +6,37 @@
 #include <stdio.h>
 #include <string.h>
 
-static const char *model_type_names[] = {
-	[MODEL_TYPE_YOLOV3] = "YOLOv3",
-	NULL
+struct model_type_to_ops_map {
+	const char *type;
+	const struct drpai_model_ops *ops;
 };
 
-const struct drpai_model *drpai_model_type_enum_to_ops(enum model_type type)
-{
-	switch(type) {
-		case MODEL_TYPE_YOLOV3: return &yolov3_model;
-		default: return NULL;
-	}
-}
+/* These are common/reference models */
+static const struct model_type_to_ops_map model_type_to_ops_map[] = {
+	{ "tinyyolov2",		&yolo_model_ops },
+	{ "tinyyolov3",		&yolo_model_ops },
+	{ "yolov2",		&yolo_model_ops },
+	{ "yolov3",		&yolo_model_ops },
+	{ /* sentinel */ }
+};
 
-enum model_type drpai_model_name_to_enum(const char *name)
+const struct drpai_model_ops *drpai_model_type_to_ops(const char *type)
 {
 	int i;
 
-	for (i = 0; model_type_names[i]; i++) {
-		if (strcmp(name, model_type_names[i]))
-			continue;
-		return i;
-	}
-
-	return MODEL_TYPE_INVALID;
-}
-
-json_object *drpai_model_types_get()
-{
-	json_object *arr;
-	int i;
-
-	arr = json_object_new_array();
-	if (!arr)
+	if (!type)
 		return NULL;
 
-	for (i = 0; model_type_names[i]; i++)
-		json_object_array_add(arr, json_object_new_string(model_type_names[i]));
+	for (i = 0; model_type_to_ops_map[i].type; i++) {
+		if (strcmp(type, model_type_to_ops_map[i].type))
+			continue;
+		return model_type_to_ops_map[i].ops;
+	}
 
-	return arr;
+	return NULL;
 }
 
+/* FIXME: Currently not used */
 char **drpai_load_labels_from_file(const char *model, const char *fname, int *ret)
 {
 	char path[512], *line = NULL;

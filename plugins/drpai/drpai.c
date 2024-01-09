@@ -36,8 +36,10 @@ struct drpai {
 	drpai_data_t input_data[DRPAI_INDEX_NUM];
 	drpai_data_t base;
 	int fd;
-	const struct drpai_model *model;
-	void *model_params;
+	struct {
+		const struct drpai_model_ops *ops;
+		void *priv;
+	} model;
 	struct {
 		int fd;
 		uint32_t base;
@@ -203,7 +205,44 @@ err_close:
 	return rc;
 }
 
-static int __drpai_load_model(struct drpai *d, const char *model, enum model_type type)
+static int drpai_load_model_config(struct drpai *d, const char *model)
+{
+	const struct drpai_model_ops *ops;
+	char model_file[512];
+	json_object *c;
+	const char *s;
+	struct stat st;
+	int rc = 0;
+
+	snprintf(model_file, sizeof(model_file), "%s/%s.json", DRPAI_MODELS_ROOT_DIR, model);
+
+	if (stat(model_file, &st))
+		return 0;
+
+	c = json_object_from_file(model_file);
+	if (!c)
+		return -errno;
+
+	s = json_object_get_string(json_object_object_get(c, "model_type"));
+	if (!s) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	ops = d->model.ops = drpai_model_type_to_ops(s);
+	if (!ops)
+		goto out;
+
+	if (!ops->init)
+		goto out;
+
+	d->model.priv = ops->init(c, &rc);
+out:
+	json_object_put(c);
+	return rc;
+}
+
+static int __drpai_load_model(struct drpai *d, const char *model)
 {
 	char model_dir[512];
 	struct dirent *ep;
@@ -214,21 +253,11 @@ static int __drpai_load_model(struct drpai *d, const char *model, enum model_typ
 	if (!d || !model)
 		return -EINVAL;
 
-	d->model = drpai_model_type_enum_to_ops(type);
-	if (!d->model)
-		return -ENOENT;
-
 	snprintf(model_dir, sizeof(model_dir), "%s/%s", DRPAI_MODELS_ROOT_DIR, model);
 
 	dp = opendir(model_dir);
 	if (!dp)
 		return -errno;
-
-	if (d->model->init) {
-		d->model_params = d->model->init(model, &rc);
-		if (rc)
-			goto out_closedir;
-	}
 
 	/* Do a pass first to try to load the address map file and any label files */
 	loaded_addmap = false;
@@ -259,6 +288,8 @@ static int __drpai_load_model(struct drpai *d, const char *model, enum model_typ
 			break;
 	}
 
+	rc = drpai_load_model_config(d, model);
+
 out_closedir:
 	closedir(dp);
 	return rc;
@@ -266,25 +297,18 @@ out_closedir:
 
 int drpai_load_model(struct drpai *d, json_object *req)
 {
-	const char *model, *type;
+	const char *model;
 	json_object *jval;
 	int rc;
 
 	jval = json_object_object_get(req, "value");
 	model = json_object_get_string(json_object_object_get(jval, "model"));
-	type = json_object_get_string(json_object_object_get(jval, "type"));
-	if (!model || !type) {
+	if (!model) {
 		rc = -EINVAL;
 		goto err;
 	}
 
-	rc = drpai_model_name_to_enum(type);
-	if (rc < 0) {
-		rc = -EINVAL;
-		goto err;
-	}
-
-	rc = __drpai_load_model(d, model, rc);
+	rc = __drpai_load_model(d, model);
 err:
 	if (rc) {
 		const char *err = strerror(-rc);
@@ -390,13 +414,16 @@ err_assign_err_code:
 
 void drpai_free(struct drpai *d)
 {
+	const struct drpai_model_ops *ops;
+
 	if (!d)
 		return;
 
 	close(d->udmabuf.fd);
 	close(d->fd);
-	if (d->model && d->model->cleanup)
-		d->model->cleanup(d->model_params);
+	ops = d->model.ops;
+	if (ops && ops->cleanup)
+		d->model.ops->cleanup(d->model.priv);
 
 	free(d);
 }
@@ -479,20 +506,14 @@ err_store:
 
 int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
 {
-	const struct drpai_model *m;
+	const struct drpai_model_ops *ops;
+	float *raw = NULL;
 	const char *err;
 	int timeout;
-	float *raw;
 	int rc;
 
 	if (!d) {
 		err = "DRP AI object not initialized";
-		goto err;
-	}
-
-	m = d->model;
-	if (!m) {
-		err = "DRP AI no model object exists";
 		goto err;
 	}
 
@@ -519,15 +540,23 @@ int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
 		goto err;
 	}
 
+	/* Yep, a bit weird to run DRP AI and not do any post-processing */
+	ops = d->model.ops;
+	if (!ops || !ops->postprocessing)
+		goto out;
+
 	/* FIXME: find a neat way to pass width, height */
-	rc = m->postprocessing(d->model_params, raw, 640, 480, result);
+	rc = ops->postprocessing(d->model.priv, raw, 640, 480, result);
 	if (rc) {
 		err = "DRP AI post-processing error";
 		goto err;
 	}
 
+out:
+	free(raw);
 	return 0;
 err:
+	free(raw);
 	json_object_object_add(result, "error", json_object_new_string(err));
 	lwsl_err("%s: %s\n", __func__, err);
 	return -1;
@@ -580,8 +609,8 @@ static bool drpai_model_has_required_files(const char *name)
 int drpai_models_get(json_object *req)
 {
 	json_object *val = NULL;
+	json_object *models;
 	struct dirent *ep;
-	json_object *models, *types;
 	const char *err;
 	DIR *dp;
 
@@ -604,14 +633,6 @@ int drpai_models_get(json_object *req)
 		goto err;
 	}
 	json_object_object_add(val, "models", models);
-
-	/* allocate JSON array for model types */
-	types = drpai_model_types_get();
-	if (!types) {
-		err = "error creating JSON array for model types";
-		goto err;
-	}
-	json_object_object_add(val, "model_types", types);
 
 	while ((ep = readdir(dp))) {
 		if (ep->d_type != DT_DIR)

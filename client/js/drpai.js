@@ -2,16 +2,14 @@
 function drpai_model_start_toggle(ws, ev)
 {
 	var model = document.getElementById("drpai_model_sel");
-	var type = document.getElementById("drpai_model_type_sel");
 	var play = (ev.currentTarget.value == "Start");
 
 	const msg_json = {
 		"name" : play ? "drpai-model-start" : "drpai-model-stop",
-		"value" : { "model": model.value, "type": type.value },
+		"value" : { "model": model.value },
 	};
 
 	model.disabled = play;
-	type.disabled = play;
 
 	ws.send(JSON.stringify(msg_json));
 
@@ -56,27 +54,9 @@ function drpai_models_populate_model_names(ws, msg)
 	});
 }
 
-function drpai_models_populate_model_types(msg)
-{
-	var sel = document.getElementById("drpai_model_type_sel");
-
-	if (!Array.isArray(msg.model_types) || msg.model_types.length == 0) {
-		sel.innerHTML = '<option value="" hidden>No model types available...</option>';
-		return;
-	}
-
-	var types = [];
-	for (let type of msg.model_types) {
-		types.push(`<option value="${type}">${type}</option>`);
-	}
-
-	sel.innerHTML = types.join();
-}
-
 function drpai_models_get_response(ws, msg)
 {
 	drpai_models_populate_model_names(ws, msg);
-	drpai_models_populate_model_types(msg);
 }
 
 function connect_drpai_socket()

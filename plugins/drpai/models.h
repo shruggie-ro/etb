@@ -3,25 +3,20 @@
 
 #include <json-c/json.h>
 
-enum model_type {
-	MODEL_TYPE_INVALID = -1,
-	MODEL_TYPE_YOLOV3,
+struct drpai_model_ops {
+	void *(*init)(json_object *config, int *err);
+	void (*cleanup)(void *priv);
+	int (*postprocessing)(void *priv, float *data, int width, int height, json_object *result);
 };
 
-struct drpai_model {
-	void *(*init)(const char *name, int *err);
-	void (*cleanup)(void *model_params);
-	int (*postprocessing)(void *model_params, float *data, int width, int height, json_object *result);
-};
-
-const struct drpai_model *drpai_model_type_enum_to_ops(enum model_type type);
+const struct drpai_model_ops *drpai_model_type_to_ops(const char *type);
+/* FIXME: Currently not used */
 char **drpai_load_labels_from_file(const char *model, const char *fname, int *ret);
 
 json_object *drpai_model_types_get();
-enum model_type drpai_model_name_to_enum(const char *name);
 
 #ifdef MODELS_PRIVATE_DATA
-extern const struct drpai_model yolov3_model;
+extern const struct drpai_model_ops yolo_model_ops;
 #endif
 
 #endif /* __MODELS_H__ */

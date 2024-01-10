@@ -3,12 +3,25 @@
 
 #include <errno.h>
 #include <math.h>
+#include <float.h>
 
 #include <libwebsockets.h>
 
+#define max(a, b)	((a) > (b) ? (a) : (b))
+
 struct yolo_model_params {
+	int ver;
 	char **labels;
 	int num_labels;
+	float *classes;
+	int num_inf_out_layer;
+	int *num_grids;
+	int num_bb;
+	float thresh_prob;
+	float thresh_nms;
+	int model_in_w;
+	int model_in_h;
+	double *anchors;
 };
 
 struct box {
@@ -22,29 +35,6 @@ struct detection {
 	struct box box;
 	int pred_class;
 	float probability;
-};
-
-#define YOLOV3_NUM_INF_OUT_LAYER	3
-static const int num_grids[] = { 13, 26, 52 }; /* the number of elements should be YOLOV3_NUM_INF_OUT_LAYER */
-
-#define YOLOV3_NUM_BB			3
-#define YOLOV3_TH_PROB			0.3f /* FIXME: make YOLOV3_TH_PROB & YOLOV3_TH_NMS adjustable or convert this to JavaScript */
-#define YOLOV3_TH_NMS			0.3f
-#define COCO_LABELS_FILENAME		"coco-labels-2014_2017.txt"
-
-#define YOLOV3_MODEL_IN_W		416
-#define YOLOV3_MODEL_IN_H		416
-
-static const double anchors[] = {
-	10, 13,
-	16, 30,
-	33, 23,
-	30, 61,
-	62, 45,
-	59, 119,
-	116, 90,
-	156, 198,
-	373, 326
 };
 
 static int yolo_index(int num_grid, int offs, int channel)
@@ -66,6 +56,24 @@ static int yolo_offset(int n, int b, int y, int x, const int* num_grids, int num
 static double sigmoid(double x)
 {
 	return 1.0 / (1.0 + exp(-x));
+}
+
+static void softmax(float *val, int num)
+{
+	float max_num = -FLT_MAX;
+	float sum = 0;
+	int i;
+
+	for (i = 0 ; i < num ; i++)
+		max_num = max(max_num, val[i]);
+
+	for (i = 0 ; i < num ; i++) {
+		val[i]= (float) exp(val[i] - max_num);
+		sum+= val[i];
+	}
+
+	for (i = 0 ; i < num ; i++)
+		val[i]= val[i] / sum;
 }
 
 static float overlap(float x1, float w1, float x2, float w2)
@@ -126,7 +134,7 @@ static void filter_boxes_nms(struct detection *d, int size, float th_nms)
 	}
 }
 
-static int yolov3_postprocessing(void *model_params, float *data, int width, int height, json_object *result)
+static int yolo_postprocessing(void *model_params, float *data, int width, int height, json_object *result)
 {
 	struct yolo_model_params *p = model_params;
 	struct detection *d, *detections = NULL;
@@ -134,27 +142,28 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 	int num_class = p->num_labels;
 	int i, n, b, y, x, rc;
 	json_object *arr, *obj;
+	float *classes = p->classes;
 
 	/* Following variables are required for correct_yolo/region_boxes in Darknet implementation*/
 	/* Note: This implementation refers to the "darknet detector test" */
 	float new_w, new_h;
 	const float correct_w = 1.;
 	const float correct_h = 1.;
-	if ((float)(YOLOV3_MODEL_IN_W / correct_w) < (float)(YOLOV3_MODEL_IN_H / correct_h)) {
-		new_w = (float)YOLOV3_MODEL_IN_W;
-		new_h = correct_h * YOLOV3_MODEL_IN_W / correct_w;
+	if ((float)(p->model_in_w / correct_w) < (float)(p->model_in_h / correct_h)) {
+		new_w = (float)p->model_in_w;
+		new_h = correct_h * p->model_in_w / correct_w;
 	} else {
-		new_w = correct_w * YOLOV3_MODEL_IN_H / correct_h;
-		new_h = YOLOV3_MODEL_IN_H;
+		new_w = correct_w * p->model_in_h / correct_h;
+		new_h = p->model_in_h;
 	}
 
-	for (n = 0; n < YOLOV3_NUM_INF_OUT_LAYER; n++) {
-		int num_grid = num_grids[n];
-		int anchor_offset = 2 * YOLOV3_NUM_BB * (YOLOV3_NUM_INF_OUT_LAYER - (n + 1));
-		for (b = 0; b < YOLOV3_NUM_BB; b++) {
+	for (n = 0; n < p->num_inf_out_layer; n++) {
+		int num_grid = p->num_grids[n];
+		int anchor_offset = 2 * p->num_bb * (p->num_inf_out_layer - (n + 1));
+		for (b = 0; b < p->num_bb; b++) {
 			for (y = 0; y < num_grid; y++) {
 				for (x = 0; x < num_grid; x++) {
-					int offs = yolo_offset(n, b, y, x, num_grids, YOLOV3_NUM_BB, num_class);
+					int offs = yolo_offset(n, b, y, x, p->num_grids, p->num_bb, num_class);
 					float tx = data[offs];
 					float ty = data[yolo_index(num_grid, offs, 1)];
 					float tw = data[yolo_index(num_grid, offs, 2)];
@@ -171,15 +180,23 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 					/* get_yolo_box/get_region_box in paper implementation*/
 					float center_x = ((float)x + sigmoid(tx)) / (float)num_grid;
 					float center_y = ((float)y + sigmoid(ty)) / (float)num_grid;
-					float box_w = (float)exp(tw) * anchors[anchor_offset + 2 * b + 0] / (float)YOLOV3_MODEL_IN_W;
-					float box_h = (float)exp(th) * anchors[anchor_offset + 2 * b + 1] / (float)YOLOV3_MODEL_IN_H;
+					float box_w;
+					float box_h;
+
+					if (p->ver == 3) {
+						box_w = (float)exp(tw) * p->anchors[anchor_offset + 2 * b + 0] / (float)p->model_in_w;
+						box_h = (float)exp(th) * p->anchors[anchor_offset + 2 * b + 1] / (float)p->model_in_h;
+					} else {
+						box_w = (float)exp(tw) * p->anchors[anchor_offset + 2 * b + 0] / (float)num_grid;
+						box_h = (float)exp(th) * p->anchors[anchor_offset + 2 * b + 1] / (float)num_grid;
+					}
 
 					/* Adjustment for VGA size */
 					/* correct_yolo/region_boxes */
-					center_x = (center_x - (YOLOV3_MODEL_IN_W - new_w) / 2. / YOLOV3_MODEL_IN_W) / ((float)new_w / YOLOV3_MODEL_IN_W);
-					center_y = (center_y - (YOLOV3_MODEL_IN_H - new_h) / 2. / YOLOV3_MODEL_IN_H) / ((float)new_h / YOLOV3_MODEL_IN_H);
-					box_w *= (float)(YOLOV3_MODEL_IN_W / new_w);
-					box_h *= (float)(YOLOV3_MODEL_IN_H / new_h);
+					center_x = (center_x - (p->model_in_w - new_w) / 2. / p->model_in_w) / ((float)new_w / p->model_in_w);
+					center_y = (center_y - (p->model_in_h - new_h) / 2. / p->model_in_h) / ((float)new_h / p->model_in_h);
+					box_w *= (float)(p->model_in_w / new_w);
+					box_h *= (float)(p->model_in_h / new_h);
 
 					center_x = round(center_x * width);
 					center_y = round(center_y * height);
@@ -188,17 +205,26 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 
 					/* Get the class prediction */
 					for (i = 0; i < num_class; i++) {
-						float class_pred = sigmoid(data[yolo_index(num_grid, offs, 5 + i)]);
-						if (class_pred > max_pred) {
+						if (p->ver == 3)
+							classes[i] = sigmoid(data[yolo_index(num_grid, offs, 5 + i)]);
+						else
+							classes[i] = data[yolo_index(num_grid, offs, 5 + i)];
+					}
+
+					if (p->ver == 2)
+						softmax(classes, num_class);
+
+					for (i = 0; i < num_class; i++) {
+						if (classes[i] > max_pred) {
 							pred_class = i;
-							max_pred = class_pred;
+							max_pred = classes[i];
 						}
 					}
 
 					probability = max_pred * objectness;
 
 					/* Store the result into the list if the probability is more than the threshold */
-					if (probability < YOLOV3_TH_PROB)
+					if (probability < p->thresh_prob)
 						continue;
 
 					if (num_detections >= allocated) {
@@ -223,7 +249,7 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 		}
 	}
 	/* Non-Maximum Supression filter */
-	filter_boxes_nms(detections, num_detections, YOLOV3_TH_NMS);
+	filter_boxes_nms(detections, num_detections, p->thresh_nms);
 
 	obj = json_object_new_object();
 	arr = json_object_new_array();
@@ -238,7 +264,7 @@ static int yolov3_postprocessing(void *model_params, float *data, int width, int
 	for (i = 0; i < num_detections; i++) {
 		json_object *jobj, *jbox;
 		d = &detections[i];
-		if (d->probability < YOLOV3_TH_PROB)
+		if (d->probability < p->thresh_prob)
 			continue;
 		jobj = json_object_new_object();
 		jbox = json_object_new_object();
@@ -270,40 +296,170 @@ err:
 	return rc;
 }
 
+static int yolo_load_labels(json_object *config, struct yolo_model_params *p)
+{
+	json_object *jobj;
+	int i;
+
+	jobj = json_object_object_get(config, "labels");
+	if (!jobj || !json_object_is_type(jobj, json_type_array))
+		return -ENOENT;
+
+	p->num_labels = json_object_array_length(jobj);
+	p->labels = malloc(sizeof(char*) * p->num_labels);
+	if (!p->labels) {
+		free(p);
+		return -ENOMEM;
+	}
+
+	/* This saves up a bit on re-allocation during processing */
+	p->classes = malloc(sizeof(*(p->classes)) * p->num_labels);
+	if (!p->classes) {
+		free(p->labels);
+		free(p);
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < p->num_labels; i++) {
+		json_object *e = json_object_array_get_idx(jobj, i);
+		p->labels[i] = strdup(json_object_get_string(e));
+	}
+
+	return 0;
+}
+
+static void yolo_free_labels(struct yolo_model_params *p)
+{
+	int i;
+
+	if (!p || !p->labels)
+		return;
+
+	for (i = 0; i < p->num_labels; i++)
+		free(p->labels[i]);
+	free(p->labels);
+	free(p->classes);
+}
+
+static int yolo_config_get_int(json_object *cfg, const char *id, int dflt)
+{
+	json_object *jobj = json_object_object_get(cfg, id);
+	return jobj ? json_object_get_int(jobj) : dflt;
+}
+
+static float yolo_config_get_float(json_object *cfg, const char *id, float dflt)
+{
+	json_object *jobj = json_object_object_get(cfg, id);
+	return jobj ? json_object_get_double(jobj) : dflt;
+}
+
+static int yolo_config_load_num_grids(json_object *cfg, struct yolo_model_params *p)
+{
+	json_object *jobj = json_object_object_get(cfg, "num_grids");
+	int i, num;
+
+	if (!jobj || !json_object_is_type(jobj, json_type_array))
+		return -EINVAL;
+
+	num = json_object_array_length(jobj);
+	p->num_inf_out_layer = num;
+	p->num_grids = malloc(sizeof(*(p->num_grids)) * num);
+	if (!p->num_grids)
+		return -ENOMEM;
+
+	for (i = 0; i < num; i++) {
+		json_object *e = json_object_array_get_idx(jobj, i);
+		p->num_grids[i] = json_object_get_int(e);
+	}
+
+	return 0;
+}
+
+static int yolo_config_load_anchors(json_object *cfg, struct yolo_model_params *p)
+{
+	json_object *jobj = json_object_object_get(cfg, "anchors");
+	int i, num;
+
+	if (!jobj || !json_object_is_type(jobj, json_type_array))
+		return -EINVAL;
+
+	num = json_object_array_length(jobj);
+	p->anchors = malloc(sizeof(*(p->anchors)) * num);
+	if (!p->anchors)
+		return -ENOMEM;
+
+	for (i = 0; i < num; i++) {
+		json_object *e = json_object_array_get_idx(jobj, i);
+		p->anchors[i] = json_object_get_double(e);
+	}
+
+	return 0;
+}
+
 static void *yolo_init(json_object *config, int *err)
 {
 	struct yolo_model_params *p = NULL;
-	json_object *jlabels;
-	int i, lret = 0;
+	int rc, lret = 0;
+	const char *s;
 
-	jlabels = json_object_object_get(config, "labels");
-	if (!jlabels || !json_object_is_type(jlabels, json_type_array)) {
+	s = json_object_get_string(json_object_object_get(config, "model_type"));
+	if (!s) {
 		lret = -ENOENT;
 		goto err_store;
 	}
 
-	p = malloc(sizeof(*p));
+	p = calloc(1, sizeof(*p));
 	if (!p) {
 		lret = -ENOMEM;
 		goto err_store;
 	}
 
-	p->num_labels = json_object_array_length(jlabels);
-	p->labels = malloc(sizeof(char*) * p->num_labels);
-	if (!p->labels) {
-		lret = -ENOMEM;
+	if (!strcmp("yolov3", s)) {
+		p->ver = 3;
+	} else if (!strcmp("yolov2", s)) {
+		p->ver = 2;
+	} else {
+		lret = -EINVAL;
 		goto err_store;
 	}
 
-	for (i = 0; i < p->num_labels; i++) {
-		json_object *e = json_object_array_get_idx(jlabels, i);
-		p->labels[i] = strdup(json_object_get_string(e));
+	rc = yolo_load_labels(config, p);
+	if (rc)
+		goto err_store;
+
+	p->model_in_w = yolo_config_get_int(config, "model_in_w", 416);
+	p->model_in_h = yolo_config_get_int(config, "model_in_h", 416);
+	p->num_bb = yolo_config_get_int(config, "num_bb", -1);
+	if (p->num_bb < 0) {
+		lret = -EINVAL;
+		goto err_store;
 	}
 
-	/* FIXME: add more customize-able YOLO params here */
+	p->thresh_prob = yolo_config_get_float(config, "thresh_prob", -1.);
+	if (p->thresh_prob < 0) {
+		lret = -EINVAL;
+		goto err_store;
+	}
+
+	p->thresh_nms = yolo_config_get_float(config, "thresh_nms", -1.);
+	if (p->thresh_nms < 0) {
+		lret = -EINVAL;
+		goto err_store;
+	}
+
+	lret = yolo_config_load_num_grids(config, p);
+	if (lret < 0)
+		goto err_store;
+
+	lret = yolo_config_load_anchors(config, p);
+	if (lret < 0)
+		goto err_store;
 
 	return p;
 err_store:
+	free(p->num_grids);
+	free(p->anchors);
+	yolo_free_labels(p);
 	free(p);
 	if (err)
 		*err = lret;
@@ -313,20 +469,19 @@ err_store:
 static void yolo_cleanup(void *model_params)
 {
 	struct yolo_model_params *p = model_params;
-	int i;
 
 	if (!p)
 		return;
 
-	for (i = 0; i < p->num_labels; i++)
-		free(p->labels[i]);
-	free(p->labels);
+	free(p->num_grids);
+	free(p->anchors);
+	yolo_free_labels(p);
 	free(p);
 }
 
 const struct drpai_model_ops yolo_model_ops = {
 	.init = yolo_init,
 	.cleanup = yolo_cleanup,
-	.postprocessing = yolov3_postprocessing,
+	.postprocessing = yolo_postprocessing,
 };
 

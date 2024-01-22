@@ -96,21 +96,21 @@ static float box_intersection(struct box *a, struct box *b)
 	return w * h;
 }
 
-static float box_union(struct box *a, struct box *b)
+static float box_union(float box_intersection, float area_a, float area_b)
 {
-	float i = box_intersection(a, b);
-	float u = a->w * a->h + b->w * b->h - i;
+	float i = box_intersection;
+	float u = area_a + area_b - i;
 	return u;
 }
 
-static float box_iou(struct box *a, struct box *b)
+static float box_iou(float box_intersection, float area_a, float area_b)
 {
-    return box_intersection(a, b) / box_union(a, b);
+    return box_intersection / box_union(box_intersection, area_a, area_b);
 }
 
 static void filter_boxes_nms(struct detection *d, int size, float th_nms)
 {
-	float b_intersection = 0;
+	float b_intersection, area_a, area_b;
 	int i, j;
 	for (i = 0; i < size; i++) {
 		struct box *a = &d[i].box;
@@ -121,10 +121,12 @@ static void filter_boxes_nms(struct detection *d, int size, float th_nms)
 			if (d[i].pred_class != d[j].pred_class)
 				continue;
 			b = &d[j].box;
+			area_a = a->h * a->w;
+			area_b = b->h * b->w;
 			b_intersection = box_intersection(a, b);
-			if ((box_iou(a, b) > th_nms) ||
-			    (b_intersection >= a->h * a->w - 1) ||
-			    (b_intersection >= b->h * b->w - 1)) {
+			if ((box_iou(b_intersection, area_a, area_b) > th_nms) ||
+			    (b_intersection >= area_a - 1) ||
+			    (b_intersection >= area_b - 1)) {
 				if (d[i].probability > d[j].probability)
 					d[j].probability = 0;
 				else

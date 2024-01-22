@@ -346,7 +346,7 @@ static int drpai_get_base_addr(struct drpai *d)
 static int drpai_get_input_mem_addr(struct drpai *d)
 {
 	/* FIXME: 'input_mem_offset is chosen arbitrarily at this point */
-	const uint32_t input_mem_offset = 0x1000000;
+	const uint32_t input_mem_offset = 0x10000;
 	char buf[32];
 	int fd, rc;
 

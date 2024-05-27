@@ -17,7 +17,7 @@ struct per_session_data__camera {
 	int cam_id;
 	tjhandle tjpeg_handle;
 	uint8_t flow_controlled:1;
-	uint8_t write_consume_pending:1;
+	struct lws *wsi;
 };
 
 #define LWS_PLUGIN_PROTOCOL_CAMERA \

@@ -9,15 +9,8 @@
 
 #define RING_DEPTH 4096
 
-/* FIXME: hack to share state between camera and DRP AI */
-static bool drpai_running = false;
-static struct drpai *drpai = NULL;
-int drpai_model_run_and_wait_hack(void *addr, json_object *result)
-{
-	if (!drpai || !drpai_running)
-		return 0;
-	return drpai_model_run_and_wait(drpai, addr, result);
-}
+bool drpai_active = false;
+struct drpai *drpai = NULL;
 
 enum command {
 	CMD_INVALID = -1,
@@ -101,10 +94,10 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__dr
 			break;
 		case CMD_MODEL_START:
 			if (drpai_load_model(pss->drpai, req) == 0)
-				drpai_running = true;
+				drpai_active = true;
 			break;
 		case CMD_MODEL_STOP:
-			drpai_running = false;
+			drpai_active = false;
 			break;
 		default:
 			break;

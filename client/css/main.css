@@ -12,6 +12,11 @@ p {
 	margin-bottom: 6px;
 }
 
+.app_table {
+	display: flex;
+	justify-content: center;
+};
+
 .row{
 	margin-bottom: 10px;
 }

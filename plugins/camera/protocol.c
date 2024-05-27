@@ -10,6 +10,8 @@
 
 #define RING_DEPTH 4096
 
+#define VIDEO_STREAM_ID_SIZE	16
+
 /* one of these created for each message */
 
 enum command {
@@ -27,8 +29,9 @@ static const char *command_names[] = {
 };
 
 struct msg {
-	json_object *response;
 	uint8_t *send_buf;
+	int send_buf_len;
+	int flags;
 };
 
 struct vhd_camera {
@@ -39,9 +42,6 @@ struct vhd_camera {
 static void __destroy_message(void *_msg)
 {
 	struct msg *msg = _msg;
-
-	json_object_put(msg->response);
-	msg->response = NULL;
 
 	free(msg->send_buf);
 	msg->send_buf = NULL;
@@ -60,6 +60,73 @@ static enum command protocol_get_command_enum(const char *cmd)
 	}
 
 	return CMD_INVALID;
+}
+
+static int queue_json_message(struct lws *wsi, struct per_session_data__camera *pss,
+			      json_object* jo)
+{
+	struct msg amsg = {};
+	const char *s;
+	size_t slen;
+	int ret;
+
+	/* should not happen, because we queue validated JSON objects */
+	s = json_object_to_json_string_length(jo, 0, &slen);
+	if (!s) {
+		lwsl_warn(" (invalid json object)\n");
+		return -1;
+	}
+
+	amsg.send_buf_len = slen;
+	amsg.send_buf = malloc(slen + LWS_PRE);
+	if (!amsg.send_buf) {
+		lwsl_warn(" (could not allocate send buffer for json message)\n");
+		return -1;
+	}
+
+	memcpy(amsg.send_buf + LWS_PRE, s, slen);
+	amsg.flags = lws_write_ws_flags(LWS_WRITE_TEXT, 1, 1);
+
+	ret = lws_ring_insert(pss->ring, &amsg, 1);
+
+	if (!ret) {
+		lwsl_warn(" (could insert message in ring)\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int queue_video_stream(struct lws *wsi, const char *stream_id,
+			      struct per_session_data__camera *pss,
+			      uint8_t* jpeg_buf, int jpeg_buflen)
+{
+	struct msg amsg = {};
+	char *s;
+	int ret;
+
+	amsg.send_buf_len = jpeg_buflen + VIDEO_STREAM_ID_SIZE;
+	amsg.send_buf = malloc(amsg.send_buf_len + LWS_PRE);
+	if (!amsg.send_buf) {
+		lwsl_warn(" (could not allocate send buffer)\n");
+		return -1;
+	}
+
+	s = (char *)(amsg.send_buf + LWS_PRE);
+	strcpy(s, stream_id);
+	memcpy(amsg.send_buf + LWS_PRE + VIDEO_STREAM_ID_SIZE, jpeg_buf, jpeg_buflen);
+
+	// FIXME: hardcoded
+	amsg.flags = lws_write_ws_flags(LWS_WRITE_BINARY, 1, 1);
+
+	ret = lws_ring_insert(pss->ring, &amsg, 1);
+
+	if (!ret) {
+		lwsl_warn(" (could insert message in ring)\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__camera *pss,
@@ -104,19 +171,14 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	}
 
 	if (send_req_back_as_reply) {
-		struct msg amsg;
-		amsg.response = req;
-		amsg.send_buf = NULL;
-		if (!lws_ring_insert(pss->ring, &amsg, 1)) {
-			__destroy_message(&amsg);
+		if (queue_json_message(wsi, pss, req)) {
+			json_object_put(req);
 			lwsl_warn("dropping!\n");
 			return -1;
 		}
-
-		json_object_get(req);
-		lws_callback_on_writable(wsi);
 	}
 
+	lws_callback_on_writable(wsi);
 	json_object_put(req);
 
 	if (final)
@@ -130,128 +192,118 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 static int handle_outgoing_message(struct lws *wsi, struct per_session_data__camera *pss)
 {
 	struct msg *pmsg;
-	int m, n, flags;
-	const char *s;
-	size_t slen;
+	int w;
 
 	pmsg = (struct msg*)lws_ring_get_element(pss->ring, &pss->tail);
 	if (!pmsg) {
-		lwsl_info(" (nothing in ring)\n");
+		lwsl_debug(" (nothing in ring)\n");
 		return -1;
 	}
 
-	/* should not happen, because we queue validated JSON objects */
-	s = json_object_to_json_string_length(pmsg->response, 0, &slen);
-	if (!s) {
-		lwsl_warn(" (invalid json response)\n");
+	w = lws_write(wsi, pmsg->send_buf + LWS_PRE, pmsg->send_buf_len, pmsg->flags);
+	if (w < pmsg->send_buf_len) {
+		lwsl_err("ERROR %d writing json to ws socket %d\n", w, pmsg->send_buf_len);
 		return -1;
 	}
 
-	n = slen;
-	pmsg->send_buf = malloc(n + LWS_PRE);
-	if (!pmsg->send_buf) {
-		lwsl_warn(" (could not allocate send buffer)\n");
-		return -1;
-	}
+	lws_ring_consume_single_tail(pss->ring, &pss->tail, 1);
 
-	memcpy(pmsg->send_buf + LWS_PRE, s, n);
-
-	// FIXME: hardcoded
-	flags = lws_write_ws_flags(LWS_WRITE_TEXT, 1, 1);
-
-	m = lws_write(wsi, pmsg->send_buf + LWS_PRE, n, flags);
-	if (m < n) {
-		lwsl_err("ERROR %d writing to ws socket\n", m);
-		return -1;
-	}
-
-	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
+	lwsl_debug(" wrote %d: flags: 0x%x\n", w, pmsg->flags);
 
 	return 0;
 }
 
-static void handle_video_drpai(struct lws *wsi, struct per_session_data__camera *pss, void *buf)
+static int handle_video_drpai(struct lws *wsi, struct per_session_data__camera *pss,
+			      void *buf, uint8_t* jpeg_buf, int jpeg_buflen)
 {
-	uint8_t *send_buf;
-	const char *s;
-	size_t slen;
-	json_object *drpai_result = json_object_new_object();
-	int m, n, flags;
+	json_object *res;
+	const char *err_msg = NULL;
+	static int get_result = 0;
 
-	drpai_model_run_and_wait_hack(buf, drpai_result);
+	struct drpai *d = drpai;
 
-	s = json_object_to_json_string_length(drpai_result, 0, &slen);
-	if (!s) {
-		lwsl_warn(" (invalid DRP AI json object)\n");
-		return;
+	if (!d || !drpai_active)
+		return 0;
+
+	if (get_result == 0) {
+		err_msg = drpai_model_load_input(d, buf, DRPAI_BUF_LEN);
+		if (err_msg) {
+			lwsl_warn("drpai_model_load_input: %s\n", err_msg);
+			goto out_send_err;
+		}
+
+		err_msg = drpai_model_start(drpai);
+		if (err_msg) {
+			lwsl_warn("drpai_model_start: %s\n", err_msg);
+			goto out_send_err;
+		}
+
+		get_result = 1;
+		// send a copy to the DRP AI canvas
+		queue_video_stream(wsi, "drpai+camera", pss, jpeg_buf, jpeg_buflen);
+		return 1;
 	}
 
-	n = slen;
-	send_buf = malloc(n + LWS_PRE);
-	if (!send_buf) {
-		lwsl_warn(" (could not allocate send buffer)\n");
-		json_object_put(drpai_result);
-		return;
+	if (drpai_is_running(d))
+		return 0;
+
+	res = json_object_new_object();
+	err_msg = drpai_model_get_result(d, res);
+	if (err_msg)
+		goto out_send_err;
+
+	if (err_msg) {
+		json_object_object_add(res, "error",
+				       json_object_new_string(err_msg));
 	}
 
-	memcpy(send_buf + LWS_PRE, s, n);
+	queue_json_message(pss->wsi, pss, res);
+	json_object_put(res);
+	get_result = 0;
 
-	// FIXME: hardcoded
-	flags = lws_write_ws_flags(LWS_WRITE_TEXT, 1, 1);
+	return 0;
 
-	m = lws_write(wsi, send_buf + LWS_PRE, n, flags);
-	if (m < n)
-		lwsl_err("ERROR %d writing to ws socket\n", m);
+out_send_err:
+	res = json_object_new_object();
+	if (err_msg) {
+		json_object_object_add(res, "error",
+				       json_object_new_string(err_msg));
+	}
 
-	json_object_put(drpai_result);
+	queue_json_message(wsi, pss, res);
+	json_object_put(res);
+
+	return 0;
 }
 
 static int handle_video_stream_out(struct lws *wsi, struct per_session_data__camera *pss)
 {
 	struct camera_buffer buf = {};
-	struct msg amsg = {};
-	uint8_t *outbuf;
+	uint8_t* jpeg_buf;
 	size_t jpeg_buflen = 0;
-	int m, n, flags;
+	int sent_frame;
 
 	if (camera_dev_acquire_capture_buffer(pss->cam_id, &buf)) {
 		lwsl_err(" (got null buffer from camera)\n");
 		return -1;
 	}
 
-	// FIXME: (hack) separate this nicer
-	handle_video_drpai(wsi, pss, buf.ptr);
-
-	outbuf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr, 640, 480,
-				     2, 1, 75, &jpeg_buflen);
-	if (!outbuf) {
+	jpeg_buf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr, 640, 480,
+				       2, 1, 75, &jpeg_buflen);
+	if (!jpeg_buf) {
 		lwsl_warn(" (could not compress jpeg)\n");
 		return -1;
 	}
 
-	n = jpeg_buflen;
-	amsg.send_buf = malloc(n + LWS_PRE);
-	if (!amsg.send_buf) {
-		tjFree(outbuf);
-		lwsl_warn(" (could not allocate send buffer)\n");
-		return -1;
-	}
+	// FIXME: (hack) separate this nicer
+	sent_frame = handle_video_drpai(wsi, pss, buf.ptr, jpeg_buf, jpeg_buflen);
 
-	memcpy(amsg.send_buf + LWS_PRE, outbuf, n);
-	tjFree(outbuf);
+	if (!sent_frame)
+		queue_video_stream(wsi, "camera", pss, jpeg_buf, jpeg_buflen);
 
-	// FIXME: hardcoded
-	flags = lws_write_ws_flags(LWS_WRITE_BINARY, 1, 1);
-
-	m = lws_write(wsi, amsg.send_buf + LWS_PRE, n, flags);
-	if (m < n) {
-		lwsl_err("ERROR %d writing to ws socket\n", m);
-		return -1;
-	}
+	tjFree(jpeg_buf);
 
 	camera_dev_release_capture_buffer(pss->cam_id, &buf);
-
-	lwsl_debug(" wrote %d: flags: 0x%x\n", m, flags);
 
 	return 0;
 }
@@ -294,6 +346,8 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 			return -1;
 		}
 
+		pss->wsi = wsi;
+
 		pss->cam_id = -1;
 		pss->tail = 0;
 		break;
@@ -302,32 +356,13 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 		lwsl_debug("LWS_CALLBACK_SERVER_WRITEABLE\n");
 
-		if (pss->write_consume_pending) {
-			/* perform the deferred fifo consume */
-			lws_ring_consume_single_tail(pss->ring, &pss->tail, 1);
-			pss->write_consume_pending = 0;
-		}
-
-		if ((handle_outgoing_message(wsi, pss) < 0) && (pss->cam_id < 0))
-			break;
-
 		if (pss->cam_id > -1)
 			handle_video_stream_out(wsi, pss);
 
-		/*
-		 * Workaround deferred deflate in pmd extension by only
-		 * consuming the fifo entry when we are certain it has been
-		 * fully deflated at the next WRITABLE callback.  You only need
-		 * this if you're using pmd.
-		 */
-		pss->write_consume_pending = 1;
-		lws_callback_on_writable(wsi);
+		while ((handle_outgoing_message(wsi, pss) == 0))
+			;
 
-		if (pss->flow_controlled &&
-		    (int)lws_ring_get_count_free_elements(pss->ring) > RING_DEPTH - 5) {
-			lws_rx_flow_control(wsi, 1);
-			pss->flow_controlled = 0;
-		}
+		lws_callback_on_writable(wsi);
 
 		break;
 
@@ -359,11 +394,6 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 		if (protocol_handle_incoming(wsi, pss, in, len))
 			break;
-
-		if (n < 3 && !pss->flow_controlled) {
-			pss->flow_controlled = 1;
-			lws_rx_flow_control(wsi, 0);
-		}
 
 		break;
 

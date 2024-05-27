@@ -8,11 +8,22 @@
   </head>
 
   <body>
-    <div class="movie">
-      <canvas id="default_canvas" class="movie_canvas" width="640" height="480"></canvas>
-    </div>
+    <table class="app_table">
+    <tr>
+      <td>
+        <div class="movie">
+          <canvas id="camera_canvas" class="movie_canvas" width="640" height="480"></canvas>
+        </div>
+      </td>
+      <td>
+        <div class="movie">
+          <canvas id="drpai_canvas" class="movie_canvas" width="640" height="480"></canvas>
+        </div>
+      </td>
+    </tr>
 
-    <div class="row">
+    <tr>
+      <td>
       <label>Current Camera Device
         <select name="camera_device_sel" id="camera_device_sel">
           <option value="" hidden>No camera device...</option>
@@ -20,15 +31,18 @@
       </label>
       <input id="camera_device_play" name="camera_device_play" type="button" value="Play" disabled />
       <span id="camera_elapsed_time" class="now_time">00:00:00</span>
-    </div>
-    <div class="row">
+      </td>
+
+      <td>
       <label>Current Model
         <select name="drpai_model_sel" id="drpai_model_sel">
           <option value="" hidden>No models available...</option>
         </select>
       </label>
       <input id="drpai_model_start" name="drpai_model_start" type="button" value="Start" disabled />
-    </div>
+      </td>
+    </tr>
+    </table>
 
     <script src="js/main.js"></script>
   </body>

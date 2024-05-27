@@ -1,10 +1,11 @@
 
 let predictionData = null; // FIXME hack
+let predictionImage = null; // FIXME hack
 
-function camera_device_play_toggle(ws, ev)
+function camera_device_play_toggle_button(ws, buttonElement)
 {
 	var sel = document.getElementById("camera_device_sel");
-	var play = (ev.currentTarget.value == "Play");
+	var play = (buttonElement.value == "Play");
 
 	const msg_json = {
 		"name" : play ? "camera-device-play" : "camera-device-stop",
@@ -16,7 +17,12 @@ function camera_device_play_toggle(ws, ev)
 	ws.send(JSON.stringify(msg_json));
 
 	// FIXME: bind this to server response
-	ev.currentTarget.value = play ? "Stop" : "Play";
+	buttonElement.value = play ? "Stop" : "Play";
+}
+
+function camera_device_play_toggle(ws, ev)
+{
+	camera_device_play_toggle_button(ws, ev.currentTarget);
 }
 
 function camera_device_selection_change(ev)
@@ -56,6 +62,10 @@ function camera_devices_get_response(ws, msg)
 	play.addEventListener('click', function(ev) {
 		camera_device_play_toggle(ws, ev);
 	});
+
+	sel.selectedIndex = 1;
+	camera_device_play_toggle_button(ws, play);
+	play.disabled = false;
 }
 
 // adapted from: https://github.com/oatpp/example-yuv-websocket-stream/blob/master/res/cam/wsImageView.html
@@ -134,34 +144,48 @@ function connect_camera_socket()
 	}
 
 	function handle_binary_response(msg) {
-		let canvas = document.getElementById("default_canvas");
+		let canvas = document.getElementById("camera_canvas");
 		yuv2CanvasImageData(canvas, msg.data);
 		update_elapsed_time();
 	}
 
-	let imgElem = document.createElement("img");
+	let imgElemCamera = document.createElement("img");
+	let imgElemDrpAi = document.createElement("img");
 	function handle_binary_response2(msg) {
-		let canvas = document.getElementById("default_canvas");
-		let context = canvas.getContext("2d");
+		let id = String.fromCharCode.apply(null, new Uint8Array(msg.data, 0, 15));
+		let canvas = document.getElementById("camera_canvas");
+		let contextCamera = canvas.getContext("2d");
 
-		let base64Image = btoa(String.fromCharCode.apply(null, new Uint8Array(msg.data)));
+		let base64Image = btoa(String.fromCharCode.apply(null, new Uint8Array(msg.data, 16)));
+		if (id.startsWith("drpai+camera"))
+			predictionImage = base64Image;
 
-		imgElem.width = 640;
-		imgElem.height = 480;
-		imgElem.src = "data:image/jpeg;base64," + base64Image;
+		imgElemCamera.width = 640;
+		imgElemCamera.height = 480;
+		imgElemCamera.src = "data:image/jpeg;base64," + base64Image;
 
-		context.drawImage(imgElem, 0, 0, 640, 480);
-		if (predictionData) {
-			var data = predictionData;
-			context.linewidth = 16;
-			context.strokeStyle = 'blue';
-			context.fillStyle = 'blue';
-			context.font = "24pt";
-			for (i = 0; i < data.length; i++) {
-				var label = data[i].label;
-				var box = data[i].box;
-				context.strokeRect(box.x, box.y, box.w, box.h);
-				context.fillText(label, box.x, (box.y + 16));
+		contextCamera.drawImage(imgElemCamera, 0, 0, 640, 480);
+		if (predictionImage) {
+			imgElemDrpAi.width = 640;
+			imgElemDrpAi.height = 480;
+			imgElemDrpAi.src = "data:image/jpeg;base64," + predictionImage;
+
+			canvas = document.getElementById("drpai_canvas");
+			let contextDrpAi = canvas.getContext("2d");
+			contextDrpAi.drawImage(imgElemDrpAi, 0, 0, 640, 480);
+
+			if (predictionData) {
+				let data = predictionData;
+				contextDrpAi.lineWidth = 16;
+				contextDrpAi.strokeStyle = 'blue';
+				contextDrpAi.fillStyle = 'blue';
+				contextDrpAi.font = "24pt";
+				for (i = 0; i < data.length; i++) {
+					let label = data[i].label;
+					let box = data[i].box;
+					contextDrpAi.strokeRect(box.x, box.y, box.w, box.h);
+					contextDrpAi.fillText(label, box.x, (box.y + 16));
+				}
 			}
 		}
 

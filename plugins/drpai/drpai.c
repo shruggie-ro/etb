@@ -428,7 +428,7 @@ void drpai_free(struct drpai *d)
 	free(d);
 }
 
-static int drpai_start(struct drpai *d, void *addr, size_t len)
+static int drpai_load(struct drpai *d, void *addr, size_t len)
 {
 	if (!d)
 		return -EINVAL;
@@ -437,13 +437,21 @@ static int drpai_start(struct drpai *d, void *addr, size_t len)
 	d->input_data[DRPAI_INDEX_INPUT].address = d->udmabuf.input;
 	memcpy(d->udmabuf.usrptr, addr, len); /* copy the data */
 
+	return 0;
+}
+
+static int drpai_start(struct drpai *d)
+{
+	if (!d)
+		return -EINVAL;
+
 	if (ioctl(d->fd, DRPAI_START, d->input_data))
 		return -errno;
 
 	return 0;
 }
 
-static int drp_is_running(struct drpai *d)
+int drpai_is_running(struct drpai *d)
 {
 	drpai_status_t drp_status;
 	int rc;
@@ -504,62 +512,64 @@ err_store:
 	return NULL;
 }
 
-int drpai_model_run_and_wait(struct drpai *d, void *addr, json_object *result)
+const char *drpai_model_load_input(struct drpai *d, void *addr, int len)
 {
-	const struct drpai_model_ops *ops;
-	float *raw = NULL;
-	const char *err;
-	int timeout;
 	int rc;
 
 	if (!d) {
-		err = "DRP AI object not initialized";
-		goto err;
+		return "DRP AI object not initialized";
 	}
 
-	rc = drpai_start(d, addr, 640 * 480 * 2); // FIXME: hard coded length
+	rc = drpai_load(d, addr, len);
 	if (rc) {
 		lwsl_warn("%s %d err %s\n", __func__, __LINE__, strerror(-rc));
-		err = "DRP AI start error";
-		goto err;
+		return "DRP AI load error";
 	}
 
-	timeout = 1000;
-	while (drp_is_running(d) && timeout-- > 0) {
-		usleep(5000);
+	return NULL;
+}
+
+const char *drpai_model_start(struct drpai *d)
+{
+	int rc;
+
+	if (!d) {
+		return "DRP AI object not initialized";
 	}
 
-	if (timeout <= 0) {
-		err = "DRP AI timeout";
-		goto err;
+	rc = drpai_start(d);
+	if (rc) {
+		lwsl_warn("%s %d err %s\n", __func__, __LINE__, strerror(-rc));
+		return "DRP AI start error";
 	}
 
-	raw = drpai_get_result_raw(d, &rc);
-	if (!raw || rc) {
-		err = "DRP AI error retrieving result";
-		goto err;
-	}
+	return NULL;
+}
+
+const char *drpai_model_get_result(struct drpai *d, json_object* result)
+{
+	const struct drpai_model_ops *ops;
+	float *raw = NULL;
+	int rc = 0;
 
 	/* Yep, a bit weird to run DRP AI and not do any post-processing */
 	ops = d->model.ops;
 	if (!ops || !ops->postprocessing)
-		goto out;
+		return NULL;
+
+	raw = drpai_get_result_raw(d, &rc);
+	if (!raw || rc) {
+		return "DRP AI error retrieving result";
+	}
 
 	/* FIXME: find a neat way to pass width, height */
 	rc = ops->postprocessing(d->model.priv, raw, 640, 480, result);
+	free(raw);
 	if (rc) {
-		err = "DRP AI post-processing error";
-		goto err;
+		return "DRP AI post-processing error";
 	}
 
-out:
-	free(raw);
-	return 0;
-err:
-	free(raw);
-	json_object_object_add(result, "error", json_object_new_string(err));
-	lwsl_err("%s: %s\n", __func__, err);
-	return -1;
+	return NULL;
 }
 
 static bool drpai_model_has_required_files(const char *name)

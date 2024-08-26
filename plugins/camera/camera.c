@@ -167,6 +167,60 @@ static struct camera_entry *camera_find_active(const char *dev, int *first_free_
 	return NULL;
 }
 
+static json_object* camera_resolutions_get(int fd)
+{
+	json_object* resolutions;
+	struct v4l2_fmtdesc fmt;
+	struct v4l2_frmsizeenum frmsize;
+
+	resolutions = json_object_new_array();
+	if (!resolutions)
+		return NULL;
+
+	memset(&fmt, 0, sizeof(fmt));
+	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+	while (xioctl(fd, VIDIOC_ENUM_FMT, &fmt) >= 0) {
+		if (fmt.pixelformat != V4L2_PIX_FMT_YUYV) {
+			lwsl_warn("Ignoring pixel format: %08X, %s", fmt.pixelformat,
+				  (const char *)fmt.description);
+			fmt.index++;
+			continue;
+		}
+
+		memset(&frmsize, 0, sizeof(frmsize));
+		frmsize.pixel_format = fmt.pixelformat;
+
+		while (xioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) >= 0) {
+			json_object *res;
+
+			if (frmsize.type != V4L2_FRMSIZE_TYPE_DISCRETE) {
+				frmsize.index++;
+				lwsl_warn("Currently only discrete frame-sizes supported\n");
+				continue;
+			}
+
+			res = json_object_new_object();
+			if (!res)
+				goto error;
+
+			json_object_object_add(res, "width", json_object_new_int(frmsize.discrete.width));
+			json_object_object_add(res, "height", json_object_new_int(frmsize.discrete.height));
+			json_object_array_add(resolutions, res);
+
+			frmsize.index++;
+		}
+
+		fmt.index++;
+	}
+
+	return resolutions;
+
+error:
+	json_object_put(resolutions);
+	return NULL;
+}
+
 /* Public functions defined from here on */
 
 int camera_devices_get(json_object *req)
@@ -193,13 +247,16 @@ int camera_devices_get(json_object *req)
 
 		memset(&caps, 0, sizeof(caps));
 		ret = xioctl(fd, VIDIOC_QUERYCAP, &caps);
-		close(fd);
-		if (ret < 0)
+		if (ret < 0) {
+			close(fd);
 			continue;
+		}
 
 		e = json_object_new_object();
-		if (!e)
+		if (!e) {
+			close(fd);
 			continue;
+		}
 
 		json_object_object_add(e, "device", json_object_new_string(dev_name));
 		json_object_object_add(e, "driver", json_object_new_string((char *)caps.driver));
@@ -209,7 +266,11 @@ int camera_devices_get(json_object *req)
 		json_object_object_add(e, "capabilities", json_object_new_int(caps.capabilities));;
 		json_object_object_add(e, "device_caps", json_object_new_int(caps.device_caps));
 
+		json_object_object_add(e, "resolutions", camera_resolutions_get(fd));
+
 		json_object_array_add(arr, e);
+
+		close(fd);
 	}
 
 	json_object_object_add(req, "value", arr);

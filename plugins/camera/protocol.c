@@ -288,7 +288,8 @@ static int handle_video_stream_out(struct lws *wsi, struct per_session_data__cam
 		return -1;
 	}
 
-	jpeg_buf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr, 640, 480,
+	jpeg_buf = turbo_jpeg_compress(pss->tjpeg_handle, buf.ptr,
+				       buf.width, buf.height,
 				       2, 1, 75, &jpeg_buflen);
 	if (!jpeg_buf) {
 		lwsl_warn(" (could not compress jpeg)\n");

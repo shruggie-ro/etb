@@ -36,15 +36,15 @@ static int xioctl(int fd, int request, void* arg)
 	return r;
 }
 
-static int camera_set_capture_parameters(int fd)
+static int camera_set_capture_parameters(int fd, int width, int height)
 {
 	struct v4l2_streamparm setfps = {};
 	struct v4l2_format fmt = {};
 
 	/* FIXME: hard-coded for now */
 	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	fmt.fmt.pix.width = 640;
-	fmt.fmt.pix.height = 480;
+	fmt.fmt.pix.width = width;
+	fmt.fmt.pix.height = height;
 	fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
 	fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
@@ -224,9 +224,10 @@ err:
 int camera_dev_play_start(json_object *req)
 {
 	struct camera_entry *cam = NULL;
-	json_object *jval;
+	json_object *jval, *jres;
 	const char *dev;
 	int ibuf, cam_id = -1;
+	int width, height;
 	const char *err = NULL;
 
 	jval = json_object_object_get(req, "value");
@@ -255,7 +256,17 @@ int camera_dev_play_start(json_object *req)
 		goto err_cam_inactive;
 	}
 
-	if (camera_set_capture_parameters(cam->fd) < 0) {
+	jres = json_object_object_get(jval, "resolution");
+	width = json_object_get_int(json_object_object_get(jres, "width"));
+	height = json_object_get_int(json_object_object_get(jres, "height"));
+
+	if (!width || !height) {
+		lwsl_warn("Invalid width/height; using default 640x480\n");
+		width = 640;
+		height = 480;
+	}
+
+	if (camera_set_capture_parameters(cam->fd, width, height) < 0) {
 		err = "error configuring camera parameters";
 		goto err_close_fd;
 	}
@@ -266,7 +277,8 @@ int camera_dev_play_start(json_object *req)
 	}
 
 	for (ibuf = 0; ibuf < NUM_MAX_CAPTURE_BUFS; ibuf++) {
-		int sz = camera_query_buffer(cam->fd, ibuf, &cam->buffers[ibuf]);
+		struct camera_buffer *buf = &cam->buffers[ibuf];
+		int sz = camera_query_buffer(cam->fd, ibuf, buf);
 		if (sz < 0) {
 			err = "error querying buffer";
 			goto err_free_bufs;
@@ -277,6 +289,9 @@ int camera_dev_play_start(json_object *req)
 			err = "error enqueuing buffer";
 			goto err_free_bufs;
 		}
+
+		buf->width = width;
+		buf->height = height;
 	}
 
 	ibuf -= 1; /* in case we need to unwind */

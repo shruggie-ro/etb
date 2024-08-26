@@ -6,6 +6,8 @@
 struct camera_buffer {
 	uint8_t *ptr;
 	size_t length;
+	int width;
+	int height;
 	uint32_t id;
 };
 

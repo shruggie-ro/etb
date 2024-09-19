@@ -37,37 +37,63 @@ function camera_devices_get_request(ws)
 	ws.send(JSON.stringify(msg_json));
 }
 
-function camera_devices_get_response(ws, msg)
-{
-	var sel = document.getElementById("camera_device_sel");
-	var play = document.getElementById("camera_device_play");
+function camera_devices_get_response(ws, msg) {
+    var sel = document.getElementById("camera_device_sel");
+    var res_sel = document.getElementById("camera_resolution_sel");
+    var play = document.getElementById("camera_device_play");
+    console.log(msg);
 
-	play.disabled = true;
+    play.disabled = true;
 
-	if (!Array.isArray(msg) || msg.length == 0) {
-		sel.innerHTML = '<option value="" hidden>No camera device...</option>';
-		return;
-	}
+    if (!Array.isArray(msg) || msg.length == 0) {
+        sel.innerHTML = '<option value="" hidden>No camera device...</option>';
+        res_sel.innerHTML = '<option value="" hidden>No resolution...</option>';
+        return;
+    }
 
-	var devices = [ "<option value='' selected>Select camera device...</option>" ];
-	for (let dev of msg) {
-		devices.push(`<option value="${dev.device}">${dev.card}</option>`);
-	}
+    // Populate the camera devices dropdown
+    var devices = ["<option value='' selected>Select camera device...</option>"];
+    for (let i = 0; i < msg.length; i++) {
+        devices.push(`<option value="${i}">${msg[i].card}</option>`);
+    }
 
-	// Register event listener when camera device changes
-	sel.innerHTML = devices.join();
-	sel.addEventListener('change', camera_device_selection_change);
+    sel.innerHTML = devices.join('');
+    
+    // Initially populate the resolution dropdown with the first device's resolutions
+    function populateResolutions(deviceIndex) {
+        var resolutions = ["<option value='' selected>Select resolution...</option>"];
+        let selectedDevice = msg[deviceIndex];
 
-	// Register event listener when the play button gets pushed
-	play.addEventListener('click', function(ev) {
-		camera_device_play_toggle(ws, ev);
-	});
+        if (selectedDevice && Array.isArray(selectedDevice.resolutions)) {
+            for (let res of selectedDevice.resolutions) {
+                resolutions.push(`<option value="${res.width}x${res.height}">${res.width}x${res.height}</option>`);
+            }
+        }
+        res_sel.innerHTML = resolutions.join('');
+    }
 
-	sel.selectedIndex = 1;
-	camera_device_play_toggle_button(ws, play);
-	play.disabled = false;
+    // Register event listener when camera device changes
+    sel.addEventListener('change', function () {
+        var deviceIndex = sel.value;  // The selected index of the device
+        if (deviceIndex !== '') {
+            populateResolutions(deviceIndex);
+        } else {
+            res_sel.innerHTML = '<option value="" hidden>No resolution...</option>';
+        }
+    });
+
+    // Pre-populate the resolutions for the first device if it exists
+    sel.selectedIndex = 1;
+    populateResolutions(0);
+
+    // Register event listener when the play button gets pushed
+    play.addEventListener('click', function (ev) {
+        camera_device_play_toggle(ws, ev);
+    });
+
+    // Enable the play button once a device is selected
+    play.disabled = false;
 }
-
 // adapted from: https://github.com/oatpp/example-yuv-websocket-stream/blob/master/res/cam/wsImageView.html
 function yuv2CanvasImageData(canvas, data)
 {

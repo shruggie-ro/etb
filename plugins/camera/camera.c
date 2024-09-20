@@ -284,6 +284,7 @@ err:
 
 int camera_dev_play_start(json_object *req)
 {
+	lwsl_warn("Play pressed");
 	struct camera_entry *cam = NULL;
 	json_object *jval, *jres;
 	const char *dev;
@@ -293,7 +294,7 @@ int camera_dev_play_start(json_object *req)
 
 	jval = json_object_object_get(req, "value");
 	dev = json_object_get_string(json_object_object_get(jval, "device"));
-	 jres = json_object_object_get(jval, "resolution");
+	jres = json_object_object_get(jval, "resolution");
 
     // Extract "width" and "height" from the "resolution" object
     width = json_object_get_int(json_object_object_get(jres, "width"));

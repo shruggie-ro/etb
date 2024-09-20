@@ -143,12 +143,12 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 	// FIXME: for now, we support only single-complete messages here
 	if (first && final) {
 		const char *s = in;
-
 		req = json_tokener_parse(s);
 		s = json_object_get_string(json_object_object_get(req, "name"));
-
 		cmd = protocol_get_command_enum(s);
 	}
+	
+	lwsl_warn("Command is: %d", cmd);
 
 	switch (cmd) {
 		case CMD_DEVICES_GET:
@@ -156,6 +156,7 @@ static int protocol_handle_incoming(struct lws *wsi, struct per_session_data__ca
 			camera_devices_get(req);
 			break;
 		case CMD_DEVICE_PLAY:
+			lwsl_warn("Start device play");
 			pss->cam_id = camera_dev_play_start(req);
 			if (pss->cam_id > -1)
 				lws_callback_on_writable(wsi);
@@ -369,7 +370,7 @@ int callback_camera(struct lws *wsi, enum lws_callback_reasons reason,
 
 	case LWS_CALLBACK_RECEIVE:
 
-		lwsl_debug("LWS_CALLBACK_RECEIVE: %4d (rpp %5d, first %d, "
+		lwsl_warn("LWS_CALLBACK_RECEIVE: %4d (rpp %5d, first %d, "
 			  "last %d, bin %d, msglen %d (+ %d = %d))\n",
 			  (int)len, (int)lws_remaining_packet_payload(wsi),
 			  lws_is_first_fragment(wsi),

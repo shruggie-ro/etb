@@ -28,8 +28,9 @@ function camera_device_play_toggle_button(ws, buttonElement) {
 
     // Send message to server
     ws.send(JSON.stringify(msg_json));
-
-    // Toggle button value
+    
+    console.log(play);
+    
     if (play) {
         buttonElement.value = "Stop";
         sel.disabled = true;
@@ -83,50 +84,50 @@ function camera_devices_get_response(ws, msg) {
 
     sel.innerHTML = devices.join('');
     res_sel.innerHTML = resolutions.join('');
-    sel.addEventListener('change', camera_device_selection_change);
+    
+    // Register event listener when the play button gets pushed
+	play.addEventListener('click', function(ev) {
+		camera_device_play_toggle(ws, ev);
+	});
 
-    play.addEventListener('click', function(ev) {
-        camera_device_play_toggle_button(ws, ev);
-    });
+	sel.selectedIndex = 1;
+	camera_device_play_toggle_button(ws, play);
+	play.disabled = false;
 
     // Select the first available device
     if (msg.length > 0) {
         sel.selectedIndex = 1; // Set to the first device
     }
-    
-    // Re-enable the button for play
-    play.disabled = false;
-    // Set the button state to "Play"
-    play.value = "Play";
 }
 
-function yuv2CanvasImageData(canvas, data) {
-    let msg_array = new Uint8ClampedArray(data);
 
-    if (msg_array.length == 0)
-        return;
+// function yuv2CanvasImageData(canvas, data, width, height) {
+//     let msg_array = new Uint8ClampedArray(data);
 
-    let context = canvas.getContext("2d");
-    let imgData = context.createImageData(640, 480);
-    let i, j;
+//     if (msg_array.length == 0)
+//         return;
 
-    for (i = 0, j = 0, g = 0; i < imgData.data.length && j < msg_array.length; i += 8, j += 4, g+= 2) {
-        const y1 = msg_array[j  ];
-        const u  = msg_array[j+1];
-        const y2 = msg_array[j+2];
-        const v  = msg_array[j+3];
+//     let context = canvas.getContext("2d");
+//     let imgData = context.createImageData(width, height);
+//     let i, j;
 
-        imgData.data[i    ] = Math.min(255, Math.max(0, Math.floor(y1+1.4075*(v-128))));
-        imgData.data[i + 1] = Math.min(255, Math.max(0, Math.floor(y1-0.3455*(u-128)-(0.7169*(v-128)))));
-        imgData.data[i + 2] = Math.min(255, Math.max(0, Math.floor(y1+1.7790*(u-128))));
-        imgData.data[i + 3] = 255;
-        imgData.data[i + 4] = Math.min(255, Math.max(0, Math.floor(y2+1.4075*(v-128))));
-        imgData.data[i + 5] = Math.min(255, Math.max(0, Math.floor(y2-0.3455*(u-128)-(0.7169*(v-128)))));
-        imgData.data[i + 6] = Math.min(255, Math.max(0, Math.floor(y2+1.7790*(u-128))));
-        imgData.data[i + 7] = 255;
-    }
-    context.putImageData(imgData, 0, 0);
-}
+//     for (i = 0, j = 0, g = 0; i < imgData.data.length && j < msg_array.length; i += 8, j += 4, g+= 2) {
+//         const y1 = msg_array[j  ];
+//         const u  = msg_array[j+1];
+//         const y2 = msg_array[j+2];
+//         const v  = msg_array[j+3];
+
+//         imgData.data[i    ] = Math.min(255, Math.max(0, Math.floor(y1+1.4075*(v-128))));
+//         imgData.data[i + 1] = Math.min(255, Math.max(0, Math.floor(y1-0.3455*(u-128)-(0.7169*(v-128)))));
+//         imgData.data[i + 2] = Math.min(255, Math.max(0, Math.floor(y1+1.7790*(u-128))));
+//         imgData.data[i + 3] = 255;
+//         imgData.data[i + 4] = Math.min(255, Math.max(0, Math.floor(y2+1.4075*(v-128))));
+//         imgData.data[i + 5] = Math.min(255, Math.max(0, Math.floor(y2-0.3455*(u-128)-(0.7169*(v-128)))));
+//         imgData.data[i + 6] = Math.min(255, Math.max(0, Math.floor(y2+1.7790*(u-128))));
+//         imgData.data[i + 7] = 255;
+//     }
+//     context.putImageData(imgData, 0, 0);
+// }
 
 function drpai_handle_object_detection_result(ws, msg) {
     if (!Array.isArray(msg) || msg.length == 0) {
@@ -168,11 +169,11 @@ function connect_camera_socket() {
                      seconds.toString().padStart(2, '0');
     }
 
-    function handle_binary_response(msg) {
-        let canvas = document.getElementById("camera_canvas");
-        yuv2CanvasImageData(canvas, msg.data);
-        update_elapsed_time();
-    }
+    // function handle_binary_response(msg) {
+    //     let canvas = document.getElementById("camera_canvas");
+    //     yuv2CanvasImageData(canvas, msg.data);
+    //     update_elapsed_time();
+    // }
 
     let imgElemCamera = document.createElement("img");
     let imgElemDrpAi = document.createElement("img");

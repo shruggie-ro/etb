@@ -5,19 +5,40 @@ let predictionImage = null; // FIXME hack
 function camera_device_play_toggle_button(ws, buttonElement)
 {
 	var sel = document.getElementById("camera_device_sel");
+	var res_sel = document.getElementById("camera_resolution_sel");
 	var play = (buttonElement.value == "Play");
+
+	var selectedResolution = res_sel.value;
+	var [width, height] = [0, 0];
+	if (selectedResolution) {
+		[width, height] = selectedResolution.split('x').map(Number);
+	}
 
 	const msg_json = {
 		"name" : play ? "camera-device-play" : "camera-device-stop",
-		"value" : { "device": sel.value },
+		"value" : {
+			"device": sel.value,
+			"resolution": {
+				"width": width,
+				"height": height
+			}
+		}
 	};
 
-	sel.disabled = play;
-
+	// Send message to server
 	ws.send(JSON.stringify(msg_json));
 
-	// FIXME: bind this to server response
-	buttonElement.value = play ? "Stop" : "Play";
+	if (play) {
+		// FIXME: bind this to server response
+		buttonElement.value = "Stop";
+		sel.disabled = true;
+		res_sel.disabled = true;
+	} else {
+		// FIXME: bind this to server response
+		buttonElement.value = "Play";
+		sel.disabled = false;
+		res_sel.disabled = false;
+	}
 }
 
 function camera_device_play_toggle(ws, ev)
@@ -40,12 +61,14 @@ function camera_devices_get_request(ws)
 function camera_devices_get_response(ws, msg)
 {
 	var sel = document.getElementById("camera_device_sel");
+	var res_sel = document.getElementById("camera_resolution_sel");
 	var play = document.getElementById("camera_device_play");
 
 	play.disabled = true;
 
 	if (!Array.isArray(msg) || msg.length == 0) {
 		sel.innerHTML = '<option value="" hidden>No camera device...</option>';
+		res_sel.innerHTML = '<option value="" hidden>No resolution...</option>';
 		return;
 	}
 
@@ -54,9 +77,16 @@ function camera_devices_get_response(ws, msg)
 		devices.push(`<option value="${dev.device}">${dev.card}</option>`);
 	}
 
-	// Register event listener when camera device changes
+	var resolutions = ["<option value='' selected>Select resolution...</option>"];
+		for (let dev of msg) {
+			for (let res of dev.resolutions) {
+				resolutions.push(`<option value="${res.width}x${res.height}">${res.width} x ${res.height}</option>`);
+		}
+	}
+
+
 	sel.innerHTML = devices.join();
-	sel.addEventListener('change', camera_device_selection_change);
+	res_sel.innerHTML = resolutions.join();
 
 	// Register event listener when the play button gets pushed
 	play.addEventListener('click', function(ev) {
@@ -66,10 +96,15 @@ function camera_devices_get_response(ws, msg)
 	sel.selectedIndex = 1;
 	camera_device_play_toggle_button(ws, play);
 	play.disabled = false;
+
+	// Select the first available device
+	if (msg.length > 0) {
+		sel.selectedIndex = 1; // Set to the first device
+	}
 }
 
 // adapted from: https://github.com/oatpp/example-yuv-websocket-stream/blob/master/res/cam/wsImageView.html
-function yuv2CanvasImageData(canvas, data)
+function yuv2CanvasImageData(canvas, data, width, height)
 {
 	let msg_array = new Uint8ClampedArray(data);
 
@@ -77,7 +112,7 @@ function yuv2CanvasImageData(canvas, data)
 		return;
 
 	let context = canvas.getContext("2d");
-	let imgData = context.createImageData(640, 480);
+	let imgData = context.createImageData(width, height);
 	let i, j;
 
 	for (i = 0, j = 0, g = 0; i < imgData.data.length && j < msg_array.length; i += 8, j += 4, g+= 2) {
@@ -203,7 +238,7 @@ function connect_camera_socket()
 	}
 
 	let ws = new_ws("camera");
-        ws.binaryType = "arraybuffer";
+	ws.binaryType = "arraybuffer";
 	try {
 		ws.onopen = function() {
 			camera_devices_get_request(ws);
@@ -217,11 +252,12 @@ function connect_camera_socket()
 			}
 		};
 
-		ws.onclose = function(){
+		ws.onclose = function() {
+			// Handle socket close if needed
 		};
 
 	} catch (exception) {
-
+		console.error("Error connecting to camera socket:", exception);
 	}
 }
 
